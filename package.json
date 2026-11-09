@@ -3,7 +3,28 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "scripts": { "dev": "vite", "build": "tsc -b && vite build", "preview": "vite preview" },
-  "dependencies": { "@vitejs/plugin-react": "latest", "framer-motion": "latest", "lucide-react": "latest", "react": "latest", "react-dom": "latest", "react-router-dom": "latest", "vite": "latest" },
-  "devDependencies": { "@types/react": "latest", "@types/react-dom": "latest", "typescript": "latest", "tailwindcss": "latest", "@tailwindcss/vite": "latest" }
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.5",
+    "framer-motion": "^14.10.1",
+    "lucide-react": "^1.70.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.6",
+    "@vitejs/plugin-react": "^6.2.1",
+    "typescript": "^7.0.2",
+    "tailwindcss": "^4.3.5",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
 }
