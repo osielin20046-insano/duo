@@ -612,9 +612,10 @@ function SharedActivity({ kind }: { kind: 'common' | 'radar' }) {
   if (!room) return <Navigate to="/sala" replace />
   if (room.selectedGame !== kind || (room.startsAt != null && room.startsAt > Date.now()) || !activity)
     return <Navigate to="/juegos" replace />
+  const currentActivity = activity!
   const voteCounts = room.members.map((member) => ({
     member,
-    votes: Object.values(activity.votes || {}).filter((id) => id === member.id).length,
+    votes: Object.values(currentActivity.votes || {}).filter((id) => id === member.id).length,
   }))
   const highScore = Math.max(0, ...voteCounts.map((row) => row.votes))
   const winners = voteCounts.filter((row) => row.votes === highScore && highScore > 0)
@@ -634,7 +635,7 @@ function SharedActivity({ kind }: { kind: 'common' | 'radar' }) {
     finally { setBusy(false) }
   }
   async function nextRound() {
-    const options = promptPool.filter((prompt) => prompt !== activity.prompt)
+    const options = promptPool.filter((prompt) => prompt !== currentActivity.prompt)
     const prompt = options[Math.floor(Math.random() * options.length)] || promptPool[0]
     setBusy(true)
     setError('')
@@ -654,28 +655,28 @@ function SharedActivity({ kind }: { kind: 'common' | 'radar' }) {
         <div className="game-page-head">
           <Link to="/juegos" className="back-link"><ArrowLeft size={15} /> Sala del equipo</Link>
           <span className="game-label"><Sparkles size={15} /> {isCommon ? 'COINCIDENCIAS' : 'RADAR DEL EQUIPO'}</span>
-          <span className="round-count">RONDA {String(activity.round).padStart(2, '0')}</span>
+          <span className="round-count">RONDA {String(currentActivity.round).padStart(2, '0')}</span>
         </div>
         <div className="activity-progress"><span style={{ width: `${Math.min(100, totalSubmitted / room.members.length * 100)}%` }} /></div>
         <div className="activity-shell">
           <div className="activity-step"><span>LA PREGUNTA DEL EQUIPO</span><b>{totalSubmitted}/{room.members.length} PARTICIPANDO</b></div>
-          <h1>{activity.prompt}</h1>
+          <h1>{currentActivity.prompt}</h1>
           <p className="activity-intro">{isCommon
             ? 'Cada quien escribe su respuesta. Cuando estén listos, el anfitrión las revela todas juntas.'
             : 'Piensa en alguien del equipo que encaje con la consigna. Todos votan y el resultado se revela al mismo tiempo.'}</p>
-          {activity.status === 'collecting' ? (
+          {currentActivity.status === 'collecting' ? (
             <div className="activity-participate">
               {isCommon ? (
                 <>
                   <label htmlFor="activity-answer">Tu respuesta</label>
-                  <textarea id="activity-answer" maxLength={280} value={value || (active ? activity.responses[active.memberId] || '' : '')} onChange={(event) => setValue(event.target.value)} placeholder="Escribe algo breve y auténtico…" />
+                  <textarea id="activity-answer" maxLength={280} value={value || (active ? currentActivity.responses[active.memberId] || '' : '')} onChange={(event) => setValue(event.target.value)} placeholder="Escribe algo breve y auténtico…" />
                 </>
               ) : (
                 <>
                   <p className="activity-pick-label">¿Quién te viene a la mente?</p>
                   <div className="activity-vote-grid">
                     {room.members.map((member, index) => (
-                      <button key={member.id} type="button" className={`activity-person ${value === member.id || (!value && active && activity.votes[active.memberId] === member.id) ? 'selected' : ''}`} onClick={() => setValue(member.id)}>
+                      <button key={member.id} type="button" className={`activity-person ${value === member.id || (!value && active && currentActivity.votes[active.memberId] === member.id) ? 'selected' : ''}`} onClick={() => setValue(member.id)}>
                         <span className="activity-person-avatar" style={{ '--member-color': ['#b4a0ff', '#f2a28f', '#92c8b4', '#ecc978'][index % 4] } as React.CSSProperties}>{member.name.slice(0, 1).toUpperCase()}</span>
                         {member.name}
                       </button>
@@ -695,7 +696,7 @@ function SharedActivity({ kind }: { kind: 'common' | 'radar' }) {
               {isCommon ? (
                 <>
                   <div className="activity-result-heading"><Sparkles size={18} /><div><strong>Esto compartimos</strong><span>Lean las respuestas y encuentren sus coincidencias.</span></div></div>
-                  <div className="activity-answer-grid">{room.members.filter((member) => activity.responses[member.id]).map((member, index) => <article className="activity-answer" key={member.id}><span>{member.name}</span><p>{activity.responses[member.id]}</p><small>{index === 0 ? '¡Alguien tenía que empezar!' : 'Una mirada del equipo'}</small></article>)}</div>
+                  <div className="activity-answer-grid">{room.members.filter((member) => currentActivity.responses[member.id]).map((member, index) => <article className="activity-answer" key={member.id}><span>{member.name}</span><p>{currentActivity.responses[member.id]}</p><small>{index === 0 ? '¡Alguien tenía que empezar!' : 'Una mirada del equipo'}</small></article>)}</div>
                 </>
               ) : (
                 <>
