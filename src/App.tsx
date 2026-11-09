@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   ArrowLeft,
@@ -8,7 +8,6 @@ import {
   Check,
   Copy,
   Crown,
-  Gamepad2,
   Heart,
   Lightbulb,
   LockKeyhole,
@@ -22,11 +21,9 @@ import { characters, phrases, questions } from './data'
 import type { Character } from './data'
 import {
   compareAnswers,
-  characterById,
   createRoom,
   getActive,
   getRoom,
-  addMember,
   joinRoom,
   refreshActiveRoom,
   saveCharacter,
@@ -398,16 +395,13 @@ function RoomPage() {
   )
 }
 function Dashboard() {
-  const nav = useNavigate(),
-    active = getActive(),
+  const active = getActive(),
     room = active ? getRoom(active.code) : null,
-    [name, setName] = useState(''),
     [toast, setToast] = useState(''),
     [startsAt, setStartsAt] = useState(''),
     [busy, setBusy] = useState(false)
   const self = room?.members.find((m) => m.id === active?.memberId)
   const isHost = Boolean(active?.hostToken)
-  const gamePath = room?.selectedGame === 'common' ? '/coincidencias' : '/radar'
   const startTime = room?.startsAt ?? null
   if (!room) return <Navigate to="/sala" replace />
   async function chooseGame(game: 'common' | 'radar') {
@@ -426,19 +420,6 @@ function Dashboard() {
     setBusy(true)
     try { await clearScheduledGame() } catch (err) { setToast(err instanceof Error ? err.message : 'No se pudo detener.') }
     finally { setBusy(false) }
-  }
-  async function add(e: React.FormEvent) {
-    e.preventDefault()
-    if (name.trim().length < 2) return
-    try {
-      await addMember(room!.code, name)
-      setName('')
-      setToast(`${name.trim()} ya está en el equipo.`)
-      setTimeout(() => setToast(''), 2800)
-    } catch (err) {
-      setToast(err instanceof Error ? err.message : 'No se pudo agregar a la persona.')
-      setTimeout(() => setToast(''), 3000)
-    }
   }
   async function copy() {
     try {
@@ -482,7 +463,6 @@ function Dashboard() {
                 <div className="eyebrow">SALA EN VIVO {isHost ? '· ERES ANFITRIÓN' : '· ESPERANDO AL ANFITRIÓN'}</div>
                 <p>{room.selectedGame ? (startTime && startTime > Date.now() ? `La dinámica inicia ${new Date(startTime).toLocaleString()}` : 'La dinámica está iniciando en todos los dispositivos.') : 'El anfitrión elige qué jugar y cuándo empezar.'}</p>
               </div>
-              {(room.selectedGame === 'common' || room.selectedGame === 'radar') && (!startTime || startTime <= Date.now()) && <button className="button button-primary" onClick={() => nav(gamePath)}>{isHost ? 'Entrar a la dinámica' : 'Entrar al juego de la sala'} <ArrowRight size={15} /></button>}
               {isHost && <div className="host-controls-actions">
                 <label className="schedule-label">Hora de inicio (opcional)<input aria-label="Hora de inicio, opcional" type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} /></label>
                 <button className="button button-primary" disabled={busy} onClick={() => void chooseGame('common')}>{startsAt ? 'Programar Coincidencias' : 'Jugar Coincidencias ahora'} <ArrowRight size={15} /></button>
@@ -534,54 +514,16 @@ function Dashboard() {
               </Link>
             </div>
             <div className="member-list">
-              {room.members.map((m, i) => {
-                const ch = characterById(m.characterId, characters)
-                return (
-                  <div className="member-row" key={m.id}>
-                    <div
-                      className="member-avatar"
-                      style={
-                        {
-                          '--member-color': ch?.color || ['#b4a0ff', '#f2a28f', '#92c8b4'][i % 3],
-                        } as React.CSSProperties
-                      }
-                    >
-                      {m.name.slice(0, 1).toUpperCase()}
-                    </div>
-                    <div>
-                      <strong>
-                        {m.name}
-                        {m.id === active?.memberId && <small> TÚ</small>}
-                      </strong>
-                      <span>{ch?.name || 'Por descubrir'}</span>
-                    </div>
-                    {ch && (
-                      <span className="member-mark" style={{ color: ch.color }}>
-                        ✳
-                      </span>
-                    )}
-                  </div>
-                )
-              })}
+              {room.members.map((member, index) => <div className="member-row" key={member.id}>
+                <div className="member-avatar" style={{ '--member-color': ['#b4a0ff', '#f2a28f', '#92c8b4', '#ecc978'][index % 4] } as React.CSSProperties}>
+                  {member.name.slice(0, 1).toUpperCase()}
+                </div>
+                <div><strong>{member.name}{member.id === active?.memberId && <small> TÚ</small>}</strong><span>{member.id === (room.hostId ?? room.members[0]?.id) ? 'Anfitrión' : 'Integrante'}</span></div>
+                {member.id === (room.hostId ?? room.members[0]?.id) && <Crown className="member-mark" size={15} />}
+              </div>)}
             </div>
-            <form className="add-member" onSubmit={add}>
-              <label htmlFor="add-name">¿Alguien más se suma?</label>
-              <div>
-                <input
-                  id="add-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Nombre de tu compañero"
-                  maxLength={32}
-                />
-                <button aria-label="Agregar participante" disabled={name.trim().length < 2}>
-                  <ArrowRight size={16} />
-                </button>
-              </div>
-              <small>También puedes invitar a tu equipo con el código de sala.</small>
-            </form>
             <Link className="team-results-link" to="/equipo">
-              Ver resultados del equipo <ArrowRight size={15} />
+              Ver equipo <ArrowRight size={15} />
             </Link>
           </aside>
         </div>
@@ -689,6 +631,7 @@ function SharedActivity({ kind }: { kind: 'common' | 'radar' }) {
               <div className="activity-roster"><strong>En la sala</strong>{room.members.map((member) => <span key={member.id} className={field?.[member.id] ? 'done' : ''}>{field?.[member.id] ? <Check size={13} /> : <span className="roster-dot" />}{member.name}{member.id === active?.memberId ? ' (tú)' : ''}</span>)}</div>
               {isHost && totalSubmitted < room.members.length && <p className="activity-host-note">Faltan {room.members.length - totalSubmitted} por participar. Al completar el equipo podrás revelar.</p>}
               {isHost && <button className="button button-dark activity-reveal" disabled={busy || totalSubmitted < room.members.length} onClick={() => void reveal()}>Revelar respuestas de todos <Sparkles size={15} /></button>}
+              {isHost && <button className="host-stop" disabled={busy} onClick={() => void finish()}>Cancelar ronda y volver a la sala</button>}
               {!isHost && <p className="activity-host-note">El anfitrión revelará la ronda cuando el equipo esté listo.</p>}
             </div>
           ) : (
@@ -1123,170 +1066,73 @@ function Quiz() {
   )
 }
 function TeamResults() {
-  const nav = useNavigate(),
-    active = getActive(),
+  const active = getActive(),
     room = active ? getRoom(active.code) : null
   if (!room) return <Navigate to="/sala" replace />
-  const total = room.members.length,
-    withResult = room.members.filter((m) => m.characterId),
-    counts = characters
-      .map((c) => ({ c, n: withResult.filter((m) => m.characterId === c.id).length }))
-      .filter((x) => x.n)
-      .sort((a, b) => b.n - a.n)
-  const max = Math.max(...counts.map((x) => x.n), 1),
-    topScore = Math.max(...Object.values(room.scores), 0),
-    leaders = room.members.filter((m) => (room.scores[m.id] || 0) === topScore)
+  const activity = room.activity
+  const hostId = room.hostId ?? room.members[0]?.id
+  let field: Record<string, string> | null = null
+  if (activity?.game === 'common') field = activity.responses
+  else if (activity?.game === 'radar') field = activity.votes
+  const submitted = Object.keys(field || {}).length
+  const gameName = room.selectedGame === 'common' ? 'Coincidencias' : room.selectedGame === 'radar' ? 'Radar del equipo' : null
   return (
     <Page>
-      <motion.section className="results-page" initial="initial" animate="animate" variants={variants}>
-        <Link to="/juegos" className="back-link">
-          <ArrowLeft size={15} /> Menú de juegos
-        </Link>
-        <div className="results-head">
+      <motion.section className="team-overview" initial="initial" animate="animate" variants={variants}>
+        <Link to="/juegos" className="back-link"><ArrowLeft size={15} /> Volver a la sala</Link>
+        <div className="team-overview-head">
           <div>
-            <div className="eyebrow">
-              SALA {room.code} <span>·</span> RESULTADOS
-            </div>
-            <h1>
-              Así se ve
-              <br />
-              <em>tu equipo.</em>
-            </h1>
+            <div className="eyebrow">EL EQUIPO · SALA {room.code}</div>
+            <h1>Conocerse también<br /><em>es jugar.</em></h1>
+            <p>Este es el grupo que comparte las preguntas, las ideas y las risas.</p>
           </div>
-          <div className="results-summary">
-            <span>PERSONAJES DESCUBIERTOS</span>
-            <strong>
-              {withResult.length}
-              <i> / {total}</i>
-            </strong>
+          <div className="team-code-card">
+            <span>CÓDIGO PARA INVITAR</span>
+            <strong>{room.code}</strong>
+            <small>Comparte este código para que cada compañero entre desde su dispositivo.</small>
           </div>
         </div>
-        {room.rounds.length > 0 && (
-          <div className="winner-ribbon">
-            <div className="winner-crown">
-              <Crown size={18} />
-            </div>
-            <div>
-              <span>MARCADOR FINAL · {room.rounds.length} RONDAS</span>
-              <strong>
-                {leaders.length > 1 ? '¡Empate de equipo!' : '¡' + leaders[0]?.name + ' se lleva la partida!'}
-              </strong>
-              <small>
-                {leaders.map((m) => m.name).join(' · ')} · {topScore} puntos
-              </small>
-            </div>
+        <section className="team-live-card">
+          <div className="team-live-icon"><Sparkles size={21} /></div>
+          <div className="team-live-copy">
+            <span className="eyebrow">LA SALA EN VIVO</span>
+            <h2>{gameName || 'La sala está lista para jugar'}</h2>
+            <p>{activity?.prompt || 'Cuando el anfitrión elija una dinámica, todos entrarán juntos automáticamente.'}</p>
           </div>
-        )}
-        <div className="results-grid">
-          <section className="people-results">
-            <div className="section-heading">
-              <div>
-                <div className="eyebrow">CADA QUIEN, A SU MANERA</div>
-                <h2>El elenco del equipo.</h2>
-              </div>
-            </div>
-            {withResult.length ? (
-              withResult.map((m) => {
-                const c = characterById(m.characterId, characters)!
-                return (
-                  <div className="result-person" key={m.id}>
-                    <div className="result-avatar" style={{ '--character-color': c.color } as React.CSSProperties}>
-                      {m.name.slice(0, 1).toUpperCase()}
-                    </div>
-                    <div className="result-person-info">
-                      <strong>
-                        {m.name}
-                        {m.id === active?.memberId && <small> TÚ</small>}
-                      </strong>
-                      <span>{c.tagline}</span>
-                      <p>{c.description}</p>
-                    </div>
-                    <span className="character-badge" style={{ '--character-color': c.color } as React.CSSProperties}>
-                      {c.name}
-                    </span>
-                  </div>
-                )
-              })
-            ) : (
-              <Empty
-                title="El elenco está por descubrirse"
-                text="Cada persona puede responder el cuestionario desde su propio perfil en este dispositivo."
-                action="Hacer mi cuestionario"
-                go={() => nav('/test-personaje')}
-              />
-            )}
-          </section>
-          <aside className="distribution-panel">
-            <div className="eyebrow">PANORAMA DEL EQUIPO</div>
-            <h3>La mezcla perfecta.</h3>
-            <p>Un buen equipo tiene muchas formas de ver las cosas.</p>
-            {counts.length ? (
-              counts.map(({ c, n }) => (
-                <div className="distribution-row" key={c.id}>
-                  <div>
-                    <span className="dist-dot" style={{ background: c.color }} />
-                    <strong>{c.name}</strong>
-                    <small>
-                      {n} {n === 1 ? 'persona' : 'personas'}
-                    </small>
-                  </div>
-                  <div className="bar-track">
-                    <i style={{ width: `${(n / max) * 100}%`, background: c.color }} />
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="no-distribution">
-                <Users size={22} />
-                <span>Cuando respondan el cuestionario, aparecerá aquí la distribución de personajes.</span>
-                <button className="button button-dark" onClick={() => nav('/test-personaje')}>
-                  Empezar cuestionario <ArrowRight size={15} />
-                </button>
-              </div>
-            )}
-            <div className="distribution-foot">
-              <Sparkles size={14} /> Ningún personaje define a una persona. ¡Es solo un juego!
-            </div>
-          </aside>
-        </div>
-        <div className="history-panel">
-          <div className="history-panel-heading">
-            <div>
-              <div className="eyebrow">MEMORIAS DEL EQUIPO</div>
-              <h2>Rondas para recordar.</h2>
-            </div>
-            <span>
-              {room.rounds.length} {room.rounds.length === 1 ? 'RONDA' : 'RONDAS'}
-            </span>
+          {activity && <div className="team-live-count"><strong>{submitted}<i>/{room.members.length}</i></strong><span>ya participaron</span></div>}
+        </section>
+        {activity && field && <div className="team-participation-list">
+          {room.members.map((member) => <div className="team-participation-row" key={member.id}>
+            <span className={`team-status-dot ${field?.[member.id] ? 'ready' : ''}`} />
+            <strong>{member.name}{member.id === active?.memberId ? ' (tú)' : ''}</strong>
+            <span>{field?.[member.id] ? 'Listo' : 'Esperando'}</span>
+          </div>)}
+        </div>}
+        <section className="team-roster-section">
+          <div className="team-section-heading">
+            <div><div className="eyebrow">QUIÉNES ESTÁN AQUÍ</div><h2>El equipo <span>{String(room.members.length).padStart(2, '0')}</span></h2></div>
+            <Link className="button button-quiet" to="/juegos">Ver dinámicas <ArrowRight size={15} /></Link>
           </div>
-          {room.rounds.length ? (
-            room.rounds
-              .slice()
-              .reverse()
-              .map((r, i) => (
-                <div className="memory-row" key={`${r.createdAt}-${i}`}>
-                  <span className="memory-index">{String(room.rounds.length - i).padStart(2, '0')}</span>
-                  <div className="memory-phrase">{r.phrase}</div>
-                  <div className="memory-answer">
-                    <span>{room.members.find((m) => m.id === r.writer)?.name}: </span>
-                    {r.original}
-                    <br />
-                    <span>{room.members.find((m) => m.id === r.guesser)?.name}: </span>
-                    {r.prediction}
-                  </div>
-                  <div className="memory-score">
-                    {r.similarity === 'exacta' ? 'Exacta' : r.similarity === 'aproximada' ? 'Muy cerca' : 'Distinta'}{' '}
-                    <strong>{r.points} pts</strong>
-                  </div>
-                </div>
-              ))
-          ) : (
-            <div className="empty-history">
-              <Gamepad2 size={18} />
-              Todavía no hay rondas guardadas. Una partida hará que este espacio cobre vida.
-            </div>
-          )}
-        </div>
+          <div className="team-member-grid">
+            {room.members.map((member, index) => <article className="team-member-card" key={member.id}>
+              <div className="team-member-avatar" style={{ '--member-color': ['#b4a0ff', '#f2a28f', '#92c8b4', '#ecc978'][index % 4] } as React.CSSProperties}>{member.name.slice(0, 1).toUpperCase()}</div>
+              <div><strong>{member.name}</strong><span>{member.id === hostId ? 'Anfitrión' : 'Integrante'}{member.id === active?.memberId ? ' · Tú' : ''}</span></div>
+              {member.id === hostId && <span className="host-crown"><Crown size={15} /></span>}
+            </article>)}
+          </div>
+        </section>
+        <section className="team-flow-section">
+          <div className="eyebrow">ASÍ SE VIVE LA SALA</div>
+          <div className="team-flow-grid">
+            <article><span>01</span><strong>Todos entran</strong><p>Comparte el código. Cada compañero se une desde su propio dispositivo.</p></article>
+            <article><span>02</span><strong>El anfitrión elige</strong><p>La dinámica y la hora se sincronizan para toda la sala.</p></article>
+            <article><span>03</span><strong>Todos participan</strong><p>La ronda se revela cuando el equipo completo responde o vota.</p></article>
+          </div>
+        </section>
+        <section className="team-games-preview">
+          <article><span>01 · RESPONDAN JUNTOS</span><h3>Coincidencias</h3><p>Una pregunta para todos. Comparen lo que pensaron y encuentren algo en común.</p></article>
+          <article><span>02 · DESCUBRAN TALENTOS</span><h3>Radar del equipo</h3><p>Todos votan por alguien para una consigna positiva y revelan cómo se ve el equipo.</p></article>
+        </section>
       </motion.section>
     </Page>
   )
@@ -1309,7 +1155,9 @@ function Games() {
   return <Dashboard />
 }
 export default function App() {
-  const [, refresh] = useState(0)
+  const [syncVersion, refresh] = useState(0)
+  const location = useLocation()
+  const navigate = useNavigate()
   useEffect(() => {
     const onSync = () => refresh((x) => x + 1)
     window.addEventListener('duo:sync', onSync)
@@ -1324,6 +1172,16 @@ export default function App() {
       window.removeEventListener('duo:sync', onSync)
     }
   }, [])
+  useEffect(() => {
+    const active = getActive()
+    const room = active ? getRoom(active.code) : null
+    if (!room) return
+    const target = room.selectedGame === 'common' ? '/coincidencias' : room.selectedGame === 'radar' ? '/radar' : null
+    const scheduled = room.startsAt != null && room.startsAt > Date.now()
+    const inActivity = location.pathname === '/coincidencias' || location.pathname === '/radar'
+    if (target && !scheduled && location.pathname !== target) navigate(target, { replace: true })
+    else if ((!target || scheduled) && inActivity) navigate('/juegos', { replace: true })
+  }, [syncVersion, location.pathname, navigate])
   return (
     <Routes>
       <Route path="/" element={<Home />} />

@@ -30,11 +30,11 @@ npm run preview
 
 ## Funcionalidades
 
-- Crear sala con código o entrar con un código existente; administrar nombres en el panel del equipo.
+- Crear una sala o unirse desde otro dispositivo con el código compartido; los participantes entran individualmente.
 - Dinámica compartida Coincidencias: todos responden la misma pregunta y el anfitrión revela el mural cuando participa el equipo completo.
 - Dinámica Radar del equipo: todos votan por una persona para una consigna positiva y descubren juntos el resultado.
 - Cuestionario individual de perfiles disponible desde los resultados del equipo.
-- Resultados del equipo con distribución de perfiles y memoria de rondas.
+- Vista del equipo con integrantes, actividad en vivo y guía para compartir la sala.
 - Diseño responsive, navegación SPA, estados vacíos y confirmaciones/mensajes de estado.
 
 ## Estructura
