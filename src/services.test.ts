@@ -118,6 +118,15 @@ describe('salas compartidas', () => {
     expect(getActive()?.memberId).toBe(room.members[0].id)
   })
 
+  it('agregar a alguien desde el panel no cambia quién eres en este dispositivo', async () => {
+    installFakeBackend()
+    const { createRoom, addMember, getActive, getRoom } = await loadServices()
+    const room = await createRoom('Ana')
+    await addMember(room.code, 'Beto')
+    expect(getActive()?.memberId).toBe(room.members[0].id)
+    expect(getRoom(room.code)?.members.map((m) => m.name)).toEqual(['Ana', 'Beto'])
+  })
+
   it('guarda rondas y personajes en la sala activa', async () => {
     const { rooms } = installFakeBackend()
     const { createRoom, joinRoom, saveRound, saveCharacter, getRoom } = await loadServices()

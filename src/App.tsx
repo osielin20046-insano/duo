@@ -26,6 +26,7 @@ import {
   createRoom,
   getActive,
   getRoom,
+  addMember,
   joinRoom,
   refreshActiveRoom,
   saveCharacter,
@@ -384,11 +385,10 @@ function Dashboard() {
     e.preventDefault()
     if (name.trim().length < 2) return
     try {
-      await joinRoom(room!.code, name)
+      await addMember(room!.code, name)
       setName('')
       setToast(`${name.trim()} ya está en el equipo.`)
       setTimeout(() => setToast(''), 2800)
-      nav('/juegos')
     } catch (err) {
       setToast(err instanceof Error ? err.message : 'No se pudo agregar a la persona.')
       setTimeout(() => setToast(''), 3000)

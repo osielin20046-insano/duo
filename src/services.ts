@@ -113,14 +113,26 @@ export const createRoom = async (name: string) => {
   throw Error('No se pudo generar un código de sala libre. Inténtalo de nuevo.')
 }
 
-export const joinRoom = async (code: string, name: string) => {
-  const { room, member } = await rpc<{ room: Room; member: Member }>('duo_join_room', {
+const joinRemote = async (code: string, name: string) =>
+  rpc<{ room: Room; member: Member }>('duo_join_room', {
     p_code: code.trim().toUpperCase(),
     p_member_id: crypto.randomUUID(),
     p_name: name.trim(),
   })
+
+// Entrar a una sala: este dispositivo pasa a ser esa persona.
+export const joinRoom = async (code: string, name: string) => {
+  const { room, member } = await joinRemote(code, name)
   cache(room)
   setActive({ code: room.code, memberId: member.id })
+  return room
+}
+
+// Agregar a alguien al equipo desde el panel: NO cambia quién eres en este dispositivo.
+// Esa persona entra después desde su propio dispositivo con el código y su mismo nombre.
+export const addMember = async (code: string, name: string) => {
+  const { room } = await joinRemote(code, name)
+  cache(room)
   return room
 }
 
