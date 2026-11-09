@@ -17,6 +17,9 @@ export type Room = {
   scores: Record<string, number>
   rounds: Round[]
   createdAt: number
+  hostId?: string
+  selectedGame?: 'phrase' | 'character' | null
+  startsAt?: number | null
 }
 const KEY = 'duo.rooms.v1',
   ACTIVE = 'duo.active.v1'
@@ -38,14 +41,14 @@ const cache = (room: Room) => {
 }
 export const getActive = () => {
   try {
-    const a = JSON.parse(localStorage.getItem(ACTIVE) || 'null')
+    const a = JSON.parse(sessionStorage.getItem(ACTIVE) || 'null')
     return a as { code: string; memberId: string } | null
   } catch {
     return null
   }
 }
 export const setActive = (a: { code: string; memberId: string } | null) =>
-  a ? localStorage.setItem(ACTIVE, JSON.stringify(a)) : localStorage.removeItem(ACTIVE)
+  a ? sessionStorage.setItem(ACTIVE, JSON.stringify(a)) : sessionStorage.removeItem(ACTIVE)
 export const getRoom = (code: string) => read().find((r) => r.code === code.toUpperCase())
 export const currentRoom = () => {
   const a = getActive()
@@ -59,6 +62,7 @@ const ERRORS: Record<string, string> = {
   invalid_name: 'Escribe un nombre de entre 2 y 32 caracteres.',
   room_full: 'La sala ya está llena (máximo 50 personas).',
   too_many_rounds: 'Esta sala alcanzó el máximo de rondas guardadas.',
+  host_only: 'Solo el anfitrión puede controlar la dinámica de la sala.',
 }
 
 // Todas las lecturas y escrituras pasan por funciones de Postgres (ver supabase-setup.sql): cada cambio se aplica
@@ -102,6 +106,9 @@ export const createRoom = async (name: string) => {
       scores: { [member.id]: 0 },
       rounds: [],
       createdAt: Date.now(),
+      hostId: member.id,
+      selectedGame: null,
+      startsAt: null,
     }
     // false = el código ya existe; se prueba con otro en lugar de sobrescribir la sala de alguien más.
     if (await rpc<boolean>('duo_create_room', { p_room: room })) {
@@ -134,6 +141,29 @@ export const addMember = async (code: string, name: string) => {
   const { room } = await joinRemote(code, name)
   cache(room)
   return room
+}
+
+export const scheduleGame = async (game: 'phrase' | 'character', startsAt: number | null) => {
+  const a = getActive()
+  if (!a) throw Error('Vuelve a entrar a la sala para continuar.')
+  cache(await rpc<Room>('duo_schedule_game', { p_code: a.code, p_member_id: a.memberId, p_game: game, p_starts_at: startsAt }))
+}
+
+export const clearScheduledGame = async () => {
+  const a = getActive()
+  if (!a) throw Error('Vuelve a entrar a la sala para continuar.')
+  cache(await rpc<Room>('duo_schedule_game', { p_code: a.code, p_member_id: a.memberId, p_game: null, p_starts_at: null }))
+}
+
+export const endRoomOnExit = () => {
+  const a = getActive()
+  if (!a || !configured) return
+  const body = JSON.stringify({ p_code: a.code, p_member_id: a.memberId })
+  try {
+    void fetch(`${url}/rest/v1/rpc/duo_end_room`, {
+      method: 'POST', headers, body, keepalive: true,
+    })
+  } catch { /* La sesión local se elimina al cerrar la pestaña aunque no haya red. */ }
 }
 
 export const saveRound = async (round: Round) => {

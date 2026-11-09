@@ -29,8 +29,11 @@ import {
   addMember,
   joinRoom,
   refreshActiveRoom,
+  endRoomOnExit,
   saveCharacter,
   saveRound,
+  scheduleGame,
+  clearScheduledGame,
 } from './services'
 import type { Round } from './services'
 
@@ -378,9 +381,29 @@ function Dashboard() {
     active = getActive(),
     room = active ? getRoom(active.code) : null,
     [name, setName] = useState(''),
-    [toast, setToast] = useState('')
+    [toast, setToast] = useState(''),
+    [startsAt, setStartsAt] = useState(''),
+    [busy, setBusy] = useState(false)
+  const self = room?.members.find((m) => m.id === active?.memberId)
+  const isHost = room ? (room.hostId ?? room.members[0]?.id) === active?.memberId : false
+  const gamePath = room?.selectedGame === 'phrase' ? '/jugar-frase' : '/test-personaje'
+  const startTime = room?.startsAt ?? null
   if (!room) return <Navigate to="/sala" replace />
-  const self = room.members.find((m) => m.id === active?.memberId)
+  async function chooseGame(game: 'phrase' | 'character') {
+    setBusy(true)
+    try {
+      const when = startsAt ? new Date(startsAt).getTime() : null
+      if (when !== null && (!Number.isFinite(when) || when < Date.now())) throw Error('Elige una hora futura.')
+      await scheduleGame(game, when)
+      setToast(when ? 'Dinámica programada para toda la sala.' : 'La dinámica comienza para toda la sala.')
+    } catch (err) { setToast(err instanceof Error ? err.message : 'No se pudo actualizar la sala.') }
+    finally { setBusy(false); setTimeout(() => setToast(''), 3000) }
+  }
+  async function stopGame() {
+    setBusy(true)
+    try { await clearScheduledGame() } catch (err) { setToast(err instanceof Error ? err.message : 'No se pudo detener.') }
+    finally { setBusy(false) }
+  }
   async function add(e: React.FormEvent) {
     e.preventDefault()
     if (name.trim().length < 2) return
@@ -431,6 +454,19 @@ function Dashboard() {
                 <h2>La diversión empieza aquí.</h2>
               </div>
             </div>
+            <section className="host-controls">
+              <div className="host-controls-head">
+                <div className="eyebrow">SALA EN VIVO {isHost ? '· ERES ANFITRIÓN' : '· ESPERANDO AL ANFITRIÓN'}</div>
+                <p>{room.selectedGame ? (startTime && startTime > Date.now() ? `La dinámica inicia ${new Date(startTime).toLocaleString()}` : 'La dinámica está iniciando en todos los dispositivos.') : 'El anfitrión elige qué jugar y cuándo empezar.'}</p>
+              </div>
+              {room.selectedGame && (!startTime || startTime <= Date.now()) && <button className="button button-primary" onClick={() => nav(gamePath)}>{isHost ? 'Entrar a la dinámica' : 'Entrar al juego de la sala'} <ArrowRight size={15} /></button>}
+              {isHost && <div className="host-controls-actions">
+                <input aria-label="Hora de inicio" type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
+                <button className="button button-primary" disabled={busy} onClick={() => void chooseGame('phrase')}>Iniciar Completa la frase <ArrowRight size={15} /></button>
+                <button className="button button-dark" disabled={busy} onClick={() => void chooseGame('character')}>Iniciar Personaje <ArrowRight size={15} /></button>
+                {room.selectedGame && <button className="host-stop" disabled={busy} onClick={() => void stopGame()}>Cancelar dinámica</button>}
+              </div>}
+            </section>
             <div className="dash-game-list">
               <article className="dash-game dash-g1">
                 <div className="dash-icon">
@@ -442,9 +478,7 @@ function Dashboard() {
                   </div>
                   <h3>Completa la frase</h3>
                   <p>¿Qué tanto conoces a tus compañeros? Intenta adivinar qué responderían.</p>
-                  <button className="button button-dark" onClick={() => nav('/jugar-frase')}>
-                    Jugar ahora <ArrowRight size={15} />
-                  </button>
+                  <span className="game-meta">El anfitrión controla el inicio</span>
                 </div>
                 <div className="dash-number">01</div>
               </article>
@@ -458,9 +492,7 @@ function Dashboard() {
                   </div>
                   <h3>¿Qué personaje eres?</h3>
                   <p>Descubre qué papel desempeñas dentro de tu equipo.</p>
-                  <button className="button button-dark" onClick={() => nav('/test-personaje')}>
-                    Descubrir mi perfil <ArrowRight size={15} />
-                  </button>
+                  <span className="game-meta">El anfitrión controla el inicio</span>
                 </div>
                 <div className="dash-number">02</div>
               </article>
@@ -1138,6 +1170,8 @@ export default function App() {
   useEffect(() => {
     const onSync = () => refresh((x) => x + 1)
     window.addEventListener('duo:sync', onSync)
+    const onPageHide = () => endRoomOnExit()
+    window.addEventListener('pagehide', onPageHide)
     const sync = () =>
       refreshActiveRoom()
         .then(() => window.dispatchEvent(new Event('duo:sync')))
@@ -1147,6 +1181,7 @@ export default function App() {
     return () => {
       window.clearInterval(timer)
       window.removeEventListener('duo:sync', onSync)
+      window.removeEventListener('pagehide', onPageHide)
     }
   }, [])
   return (
