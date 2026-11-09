@@ -31,6 +31,8 @@ import {
   refreshActiveRoom,
   saveCharacter,
   saveRound,
+  scheduleGame,
+  clearScheduledGame,
 } from './services'
 import type { Round } from './services'
 
@@ -353,7 +355,7 @@ function RoomPage() {
                     id="code"
                     value={code}
                     onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 8))}
-                    placeholder="Ej. D4M8Q"
+                    placeholder="Ej. ABCD1234"
                     maxLength={8}
                     className="code-input"
                   />
@@ -378,9 +380,29 @@ function Dashboard() {
     active = getActive(),
     room = active ? getRoom(active.code) : null,
     [name, setName] = useState(''),
-    [toast, setToast] = useState('')
+    [toast, setToast] = useState(''),
+    [startsAt, setStartsAt] = useState(''),
+    [busy, setBusy] = useState(false)
+  const self = room?.members.find((m) => m.id === active?.memberId)
+  const isHost = Boolean(active?.hostToken)
+  const gamePath = room?.selectedGame === 'phrase' ? '/jugar-frase' : '/test-personaje'
+  const startTime = room?.startsAt ?? null
   if (!room) return <Navigate to="/sala" replace />
-  const self = room.members.find((m) => m.id === active?.memberId)
+  async function chooseGame(game: 'phrase' | 'character') {
+    setBusy(true)
+    try {
+      const when = startsAt ? new Date(startsAt).getTime() : null
+      if (when !== null && (!Number.isFinite(when) || when < Date.now())) throw Error('Elige una hora futura.')
+      await scheduleGame(game, when)
+      setToast(when ? 'Dinámica programada para toda la sala.' : 'La dinámica comienza para toda la sala.')
+    } catch (err) { setToast(err instanceof Error ? err.message : 'No se pudo actualizar la sala.') }
+    finally { setBusy(false); setTimeout(() => setToast(''), 3000) }
+  }
+  async function stopGame() {
+    setBusy(true)
+    try { await clearScheduledGame() } catch (err) { setToast(err instanceof Error ? err.message : 'No se pudo detener.') }
+    finally { setBusy(false) }
+  }
   async function add(e: React.FormEvent) {
     e.preventDefault()
     if (name.trim().length < 2) return
@@ -431,6 +453,19 @@ function Dashboard() {
                 <h2>La diversión empieza aquí.</h2>
               </div>
             </div>
+            <section className="host-controls">
+              <div className="host-controls-head">
+                <div className="eyebrow">SALA EN VIVO {isHost ? '· ERES ANFITRIÓN' : '· ESPERANDO AL ANFITRIÓN'}</div>
+                <p>{room.selectedGame ? (startTime && startTime > Date.now() ? `La dinámica inicia ${new Date(startTime).toLocaleString()}` : 'La dinámica está iniciando en todos los dispositivos.') : 'El anfitrión elige qué jugar y cuándo empezar.'}</p>
+              </div>
+              {room.selectedGame && (!startTime || startTime <= Date.now()) && <button className="button button-primary" onClick={() => nav(gamePath)}>{isHost ? 'Entrar a la dinámica' : 'Entrar al juego de la sala'} <ArrowRight size={15} /></button>}
+              {isHost && <div className="host-controls-actions">
+                <input aria-label="Hora de inicio" type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
+                <button className="button button-primary" disabled={busy} onClick={() => void chooseGame('phrase')}>Iniciar Completa la frase <ArrowRight size={15} /></button>
+                <button className="button button-dark" disabled={busy} onClick={() => void chooseGame('character')}>Iniciar Personaje <ArrowRight size={15} /></button>
+                {room.selectedGame && <button className="host-stop" disabled={busy} onClick={() => void stopGame()}>Cancelar dinámica</button>}
+              </div>}
+            </section>
             <div className="dash-game-list">
               <article className="dash-game dash-g1">
                 <div className="dash-icon">
@@ -442,9 +477,7 @@ function Dashboard() {
                   </div>
                   <h3>Completa la frase</h3>
                   <p>¿Qué tanto conoces a tus compañeros? Intenta adivinar qué responderían.</p>
-                  <button className="button button-dark" onClick={() => nav('/jugar-frase')}>
-                    Jugar ahora <ArrowRight size={15} />
-                  </button>
+                  <span className="game-meta">El anfitrión controla el inicio</span>
                 </div>
                 <div className="dash-number">01</div>
               </article>
@@ -458,9 +491,7 @@ function Dashboard() {
                   </div>
                   <h3>¿Qué personaje eres?</h3>
                   <p>Descubre qué papel desempeñas dentro de tu equipo.</p>
-                  <button className="button button-dark" onClick={() => nav('/test-personaje')}>
-                    Descubrir mi perfil <ArrowRight size={15} />
-                  </button>
+                  <span className="game-meta">El anfitrión controla el inicio</span>
                 </div>
                 <div className="dash-number">02</div>
               </article>
@@ -553,6 +584,8 @@ function SentenceGame() {
     [roundNo, setRoundNo] = useState((room?.rounds.length || 0) + 1),
     [error, setError] = useState('')
   if (!room) return <Navigate to="/sala" replace />
+  if (room.selectedGame !== 'phrase' || (room.startsAt != null && room.startsAt > Date.now()))
+    return <Navigate to="/juegos" replace />
   const available = room.members
   if (available.length < 2)
     return (
@@ -825,6 +858,8 @@ function Quiz() {
     [result, setResult] = useState<Character | null>(null),
     [flipped, setFlipped] = useState(false)
   if (!room) return <Navigate to="/sala" replace />
+  if (room.selectedGame !== 'character' || (room.startsAt != null && room.startsAt > Date.now()))
+    return <Navigate to="/juegos" replace />
   async function choose(id: string) {
     const next = [...answers.slice(0, step), id]
     setAnswers(next)

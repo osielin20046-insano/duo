@@ -20,7 +20,7 @@ expect "no puede insertar"           "permission denied" "$(run "insert into pub
 expect "no puede actualizar"         "permission denied" "$(run "update public.duo_rooms set room='{}'")"
 
 echo "Funciones"
-ROOM='{"code":"abcd2","members":[{"id":"a","name":"Ana"}],"scores":{"a":0},"rounds":[],"createdAt":1}'
+ROOM='{"code":"abcd2","members":[{"id":"a","name":"Ana"}],"scores":{"a":0},"rounds":[],"createdAt":1,"hostToken":"token-a"}'
 expect "crear sala"                  "t" "$(run "select public.duo_create_room('$ROOM')")"
 expect "código repetido -> false"    "f" "$(run "select public.duo_create_room('$ROOM')")"
 expect "código inválido"             "invalid_code" "$(psql -q -tA -c "set role anon; select public.duo_create_room('{\"code\":\"x\"}')" 2>&1)"

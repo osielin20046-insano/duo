@@ -8,8 +8,17 @@
 create table if not exists public.duo_rooms (
   code text primary key check (code = upper(code)),
   room jsonb not null,
+  host_token text,
+  host_seen_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
+
+alter table public.duo_rooms add column if not exists host_token text;
+alter table public.duo_rooms add column if not exists host_seen_at timestamptz not null default now();
+
+-- Retira las RPC antiguas que confiaban en un ID de anfitrión visible para todos.
+drop function if exists public.duo_schedule_game(text, text, text, bigint);
+drop function if exists public.duo_end_room(text, text);
 
 alter table public.duo_rooms enable row level security;
 
@@ -21,8 +30,14 @@ revoke all on table public.duo_rooms from anon, authenticated;
 
 -- Lee una sala por código.
 create or replace function public.duo_get_room(p_code text)
-returns jsonb language sql stable security definer set search_path = public as $$
-  select room from public.duo_rooms where code = upper(p_code)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare r jsonb;
+begin
+  delete from public.duo_rooms
+   where code = upper(p_code) and host_seen_at < now() - interval '5 minutes';
+  select room into r from public.duo_rooms where code = upper(p_code);
+  return r;
+end
 $$;
 
 -- Crea una sala. Devuelve false si el código ya existe (no sobrescribe nada).
@@ -36,7 +51,11 @@ begin
   if octet_length(p_room::text) > 50000 then
     raise exception 'room_too_large' using errcode = 'PT400';
   end if;
-  insert into public.duo_rooms (code, room) values (v_code, p_room || jsonb_build_object('code', v_code))
+  if coalesce(p_room->>'hostToken', '') = '' then
+    raise exception 'missing_host_token' using errcode = 'PT400';
+  end if;
+  insert into public.duo_rooms (code, room, host_token, host_seen_at)
+  values (v_code, (p_room - 'hostToken') || jsonb_build_object('code', v_code), p_room->>'hostToken', now())
   on conflict (code) do nothing;
   return found;
 end
@@ -54,6 +73,7 @@ begin
   if char_length(v_name) not between 2 and 32 then
     raise exception 'invalid_name' using errcode = 'PT400';
   end if;
+  perform public.duo_get_room(v_code);
   select room into r from public.duo_rooms where code = v_code for update;
   if r is null then
     raise exception 'room_not_found' using errcode = 'PT404';
@@ -127,7 +147,40 @@ begin
 end
 $$;
 
+-- La clave privada del anfitrión no forma parte del JSON de sala que leen los participantes.
+create or replace function public.duo_schedule_game(p_code text, p_host_token text, p_game text, p_starts_at bigint)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare r jsonb;
+begin
+  select room into r from public.duo_rooms where code = upper(p_code) for update;
+  if r is null then raise exception 'room_not_found' using errcode = 'PT404'; end if;
+  if not exists (select 1 from public.duo_rooms where code = upper(p_code) and host_token = p_host_token) then
+    raise exception 'host_only' using errcode = 'PT403';
+  end if;
+  if p_game is not null and p_game not in ('phrase', 'character') then raise exception 'invalid_game' using errcode = 'PT400'; end if;
+  r := r || jsonb_build_object('selectedGame', p_game, 'startsAt', p_starts_at);
+  update public.duo_rooms set room = r where code = upper(p_code);
+  return r;
+end
+$$;
+
+-- La presencia del anfitrión renueva la sesión. Al cerrar el navegador deja de renovarse.
+create or replace function public.duo_host_heartbeat(p_code text, p_host_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare r jsonb;
+begin
+  perform public.duo_get_room(p_code);
+  update public.duo_rooms set host_seen_at = now()
+   where code = upper(p_code) and host_token = p_host_token
+     and host_seen_at >= now() - interval '5 minutes'
+   returning room into r;
+  return r;
+end
+$$;
+
 revoke all on function public.duo_get_room(text), public.duo_create_room(jsonb), public.duo_join_room(text, text, text),
-  public.duo_add_round(text, jsonb), public.duo_set_character(text, text, text, jsonb) from public;
+  public.duo_add_round(text, jsonb), public.duo_set_character(text, text, text, jsonb),
+  public.duo_schedule_game(text, text, text, bigint), public.duo_host_heartbeat(text, text) from public;
 grant execute on function public.duo_get_room(text), public.duo_create_room(jsonb), public.duo_join_room(text, text, text),
-  public.duo_add_round(text, jsonb), public.duo_set_character(text, text, text, jsonb) to anon, authenticated;
+  public.duo_add_round(text, jsonb), public.duo_set_character(text, text, text, jsonb),
+  public.duo_schedule_game(text, text, text, bigint), public.duo_host_heartbeat(text, text) to anon, authenticated;

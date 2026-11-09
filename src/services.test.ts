@@ -80,13 +80,13 @@ describe('salas compartidas', () => {
     vi.restoreAllMocks()
   })
 
-  it('crea salas con códigos de 5 caracteres sin letras ambiguas y deja activa a la persona', async () => {
+  it('crea salas con códigos de 8 caracteres sin letras ambiguas y deja activa a la persona', async () => {
     const { rooms } = installFakeBackend()
     const { createRoom, getActive } = await loadServices()
     const room = await createRoom(' Ana ')
-    expect(room.code).toMatch(/^[A-HJ-NP-Z2-9]{5}$/)
+    expect(room.code).toMatch(/^[A-HJ-NP-Z2-9]{8}$/)
     expect(rooms.get(room.code).members[0].name).toBe('Ana')
-    expect(getActive()).toEqual({ code: room.code, memberId: room.members[0].id })
+    expect(getActive()).toMatchObject({ code: room.code, memberId: room.members[0].id, hostToken: expect.any(String) })
   })
 
   it('prueba otro código si el generado ya existe, sin tocar la sala ajena', async () => {
