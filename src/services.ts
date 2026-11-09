@@ -17,7 +17,6 @@ export type Room = {
   scores: Record<string, number>
   rounds: Round[]
   createdAt: number
-  rev?: number
 }
 const KEY = 'duo.rooms.v1',
   ACTIVE = 'duo.active.v1'
@@ -52,60 +51,40 @@ export const currentRoom = () => {
   const a = getActive()
   return a ? getRoom(a.code) : undefined
 }
-const API = `${url}/rest/v1/duo_rooms`
 const headers = { apikey: anon || '', Authorization: `Bearer ${anon || ''}`, 'Content-Type': 'application/json' }
-const requireConfig = () => {
+
+const ERRORS: Record<string, string> = {
+  room_not_found: 'No encontramos esa sala. Revisa el código e inténtalo de nuevo.',
+  member_not_found: 'No encontramos a esa persona en la sala.',
+  invalid_name: 'Escribe un nombre de entre 2 y 32 caracteres.',
+  room_full: 'La sala ya está llena (máximo 50 personas).',
+  too_many_rounds: 'Esta sala alcanzó el máximo de rondas guardadas.',
+}
+
+// Todas las lecturas y escrituras pasan por funciones de Postgres (ver supabase-setup.sql): cada cambio se aplica
+// con la sala bloqueada, así que varias personas guardando a la vez no se pisan.
+async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   if (!configured) throw Error('La conexión con Supabase todavía no está configurada.')
-}
-
-async function fetchRoom(code: string): Promise<Room | undefined> {
-  requireConfig()
-  const response = await fetch(`${API}?code=eq.${encodeURIComponent(code.toUpperCase())}&select=room`, { headers })
-  if (!response.ok) throw Error('No se pudo consultar la sala. Revisa la configuración de Supabase.')
-  const rows = (await response.json()) as { room: Room }[]
-  return rows[0]?.room
-}
-
-// Inserta una sala nueva. Devuelve false si el código ya existe (en vez de sobrescribir la sala de otro equipo).
-async function insertRoom(room: Room): Promise<boolean> {
-  requireConfig()
-  const response = await fetch(API, {
-    method: 'POST',
-    headers: { ...headers, Prefer: 'return=minimal' },
-    body: JSON.stringify({ code: room.code, room }),
-  })
-  if (response.status === 409) return false
-  if (!response.ok) throw Error('No se pudo guardar la sala. Revisa la tabla y los permisos de Supabase.')
-  return true
-}
-
-// Lee la sala, aplica el cambio y la guarda solo si nadie más la modificó entre medio (campo `rev`).
-// Si hubo un choque, vuelve a leer y a aplicar el cambio. `change` devuelve false cuando no hay nada que guardar.
-async function mutateRoom(code: string, change: (room: Room) => boolean | void): Promise<Room | undefined> {
-  requireConfig()
-  const encoded = encodeURIComponent(code.toUpperCase())
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const room = await fetchRoom(code)
-    if (!room) return undefined
-    if (change(room) === false) return room
-    const rev = room.rev ?? 0
-    room.rev = rev + 1
-    const guard = rev === 0 ? 'or=(room->>rev.is.null,room->>rev.eq.0)' : `room->>rev=eq.${rev}`
-    const response = await fetch(`${API}?code=eq.${encoded}&${guard}`, {
-      method: 'PATCH',
-      headers: { ...headers, Prefer: 'return=representation' },
-      body: JSON.stringify({ room }),
-    })
-    if (!response.ok) throw Error('No se pudo guardar la sala. Revisa la tabla y los permisos de Supabase.')
-    if (((await response.json()) as unknown[]).length === 1) return room
+  let response: Response
+  try {
+    response = await fetch(`${url}/rest/v1/rpc/${fn}`, { method: 'POST', headers, body: JSON.stringify(args) })
+  } catch {
+    throw Error('No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.')
   }
-  throw Error('La sala está muy concurrida en este momento. Inténtalo de nuevo.')
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { message?: string } | null
+    throw Error(
+      ERRORS[body?.message ?? ''] ??
+        'No se pudo completar la acción. Revisa que ejecutaste supabase-setup.sql en Supabase.',
+    )
+  }
+  return (await response.json()) as T
 }
 
 export async function refreshActiveRoom() {
   const active = getActive()
   if (!active || !configured) return
-  const room = await fetchRoom(active.code)
+  const room = await rpc<Room | null>('duo_get_room', { p_code: active.code })
   if (room) cache(room)
 }
 
@@ -123,9 +102,9 @@ export const createRoom = async (name: string) => {
       scores: { [member.id]: 0 },
       rounds: [],
       createdAt: Date.now(),
-      rev: 0,
     }
-    if (await insertRoom(room)) {
+    // false = el código ya existe; se prueba con otro en lugar de sobrescribir la sala de alguien más.
+    if (await rpc<boolean>('duo_create_room', { p_room: room })) {
       cache(room)
       setActive({ code: room.code, memberId: member.id })
       return room
@@ -135,43 +114,35 @@ export const createRoom = async (name: string) => {
 }
 
 export const joinRoom = async (code: string, name: string) => {
-  const normalized = code.trim().toUpperCase()
-  const clean = name.trim()
-  const found: { member?: Member } = {}
-  const room = await mutateRoom(normalized, (r) => {
-    found.member = r.members.find((x) => x.name.toLowerCase() === clean.toLowerCase())
-    if (found.member) return false
-    found.member = { id: crypto.randomUUID(), name: clean }
-    r.members.push(found.member)
-    r.scores[found.member.id] = 0
+  const { room, member } = await rpc<{ room: Room; member: Member }>('duo_join_room', {
+    p_code: code.trim().toUpperCase(),
+    p_member_id: crypto.randomUUID(),
+    p_name: name.trim(),
   })
-  if (!room || !found.member) throw Error('No encontramos esa sala. Revisa el código e inténtalo de nuevo.')
   cache(room)
-  setActive({ code: room.code, memberId: found.member.id })
+  setActive({ code: room.code, memberId: member.id })
   return room
 }
 
 export const saveRound = async (round: Round) => {
   const a = getActive()
   if (!a) return
-  const room = await mutateRoom(a.code, (r) => {
-    r.rounds.push(round)
-    if (round.points) r.scores[round.guesser] = (r.scores[round.guesser] || 0) + round.points
-  })
-  if (room) cache(room)
+  cache(await rpc<Room>('duo_add_round', { p_code: a.code, p_round: round }))
 }
 
 export const saveCharacter = async (characterId: string, answers: string[]) => {
   const a = getActive()
   if (!a) return
-  const room = await mutateRoom(a.code, (r) => {
-    const m = r.members.find((x) => x.id === a.memberId)
-    if (!m) return false
-    m.characterId = characterId
-    m.answers = answers
-  })
-  if (room) cache(room)
+  cache(
+    await rpc<Room>('duo_set_character', {
+      p_code: a.code,
+      p_member_id: a.memberId,
+      p_character: characterId,
+      p_answers: answers,
+    }),
+  )
 }
+
 export const memberId = () => getActive()?.memberId
 export const allRooms = read
 export function compareAnswers(

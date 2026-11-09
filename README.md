@@ -49,7 +49,7 @@ src/
 
 ## Persistencia y límites conocidos
 
-Las salas, integrantes, resultados, historial y puntuaciones se guardan en Supabase. La sesión activa se conserva en `localStorage` para recordar quién eres en ese navegador. La app vuelve a consultar la sala cada tres segundos para reflejar cambios entre dispositivos. Cada escritura usa control de concurrencia optimista (campo `rev` dentro de la sala) y se reintenta si otra persona guardó al mismo tiempo, así que dos jugadores guardando a la vez no se pisan. El acceso es por código y nombre; esta configuración sirve para un MVP y no implementa autenticación de usuarios. Las políticas de `supabase-setup.sql` permiten que cualquiera con la clave anon lea y modifique cualquier sala; el código de sala hace de "contraseña", así que no guardes información sensible.
+Las salas, integrantes, resultados, historial y puntuaciones se guardan en Supabase. La sesión activa se conserva en `localStorage` para recordar quién eres en ese navegador. La app vuelve a consultar la sala cada tres segundos para reflejar cambios entre dispositivos. Todas las lecturas y escrituras pasan por funciones de Postgres (`duo_get_room`, `duo_join_room`, `duo_add_round`…) que bloquean la sala mientras la modifican, así que varios jugadores guardando a la vez no se pisan. El acceso es por código y nombre; esta configuración sirve para un MVP y no implementa autenticación de usuarios. El navegador ya no puede leer ni escribir la tabla directamente: solo llama a esas funciones, que exigen conocer el código de sala (nadie puede listar o sobrescribir salas ajenas). Aun así, quien tenga el código puede entrar a la sala, así que no guardes información sensible.
 
 La coincidencia aproximada compara palabras normalizadas en español y no usa IA. El empate del cuestionario elige aleatoriamente entre los perfiles con más respuestas. Los resultados son lúdicos, no son evaluaciones psicológicas.
 
@@ -62,4 +62,11 @@ La app guarda las salas en Supabase para compartirlas entre dispositivos. Config
 3. Agrega `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` en Settings → Environment Variables.
 4. `vercel.json` reescribe las rutas SPA a `index.html`, permitiendo recargar rutas internas.
 
-> Ejecuta primero `supabase-setup.sql` en el SQL Editor del proyecto de Supabase.
+> Ejecuta `supabase-setup.sql` en el SQL Editor **antes** de desplegar esta versión (es idempotente y conserva las salas existentes): el cliente ya no funciona con las políticas abiertas de la versión anterior.
+
+## Pruebas
+
+```bash
+npm test                      # cliente: comparación de respuestas y flujo de salas (servidor simulado)
+./scripts/test-sql.sh         # SQL: permisos y concurrencia reales; requiere un Postgres local (ver el encabezado del script)
+```

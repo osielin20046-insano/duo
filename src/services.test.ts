@@ -1,45 +1,54 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-type Row = { code: string; room: any }
-
+// Servidor falso con la misma interfaz que las funciones de supabase-setup.sql.
+// La garantía de concurrencia vive en Postgres y se prueba con scripts/test-sql.sh.
 function installFakeBackend() {
-  const store = new Map<string, any>()
+  const rooms = new Map<string, any>()
   const data: Record<string, string> = {}
   vi.stubGlobal('localStorage', {
     getItem: (k: string) => data[k] ?? null,
     setItem: (k: string, v: string) => void (data[k] = v),
     removeItem: (k: string) => void delete data[k],
   })
-  const stats = { conflicts: 0 }
-  vi.stubGlobal('fetch', async (u: string, init: RequestInit = {}) => {
-    const url = new URL(u)
-    const code = url.searchParams.get('code')?.replace('eq.', '') ?? ''
-    const res = (status: number, body: unknown) => ({ ok: status < 300, status, json: async () => body }) as Response
-    await new Promise((r) => setTimeout(r, Math.random() * 5)) // latencia aleatoria para intercalar escrituras
-    if (init.method === 'POST') {
-      const row = JSON.parse(init.body as string) as Row
-      if (store.has(row.code)) return res(409, {})
-      store.set(row.code, row.room)
-      return res(201, null)
+  const calls: { fn: string; args: any }[] = []
+  const fail = (message: string) => ({ ok: false, status: 400, json: async () => ({ message }) }) as Response
+  const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as Response
+  vi.stubGlobal('fetch', async (u: string, init: RequestInit) => {
+    const fn = u.split('/rpc/')[1]
+    const args = JSON.parse(init.body as string)
+    calls.push({ fn, args })
+    const room = rooms.get((args.p_code ?? args.p_room?.code ?? '').toUpperCase())
+    if (fn === 'duo_create_room') {
+      if (room) return ok(false)
+      rooms.set(args.p_room.code, args.p_room)
+      return ok(true)
     }
-    if (init.method === 'PATCH') {
-      const current = store.get(code)
-      if (!current) return res(200, [])
-      const eq = url.searchParams.get('room->>rev')
-      const or = url.searchParams.get('or')
-      const rev = current.rev ?? null
-      const ok = eq !== null ? String(rev) === eq.replace('eq.', '') : or !== null ? rev === null || rev === 0 : true
-      if (!ok) {
-        stats.conflicts++
-        return res(200, [])
+    if (!room) return fn === 'duo_get_room' ? ok(null) : fail('room_not_found')
+    if (fn === 'duo_get_room') return ok(room)
+    if (fn === 'duo_join_room') {
+      let member = room.members.find((m: any) => m.name.toLowerCase() === args.p_name.toLowerCase())
+      if (!member) {
+        member = { id: args.p_member_id, name: args.p_name }
+        room.members.push(member)
+        room.scores[member.id] = 0
       }
-      store.set(code, (JSON.parse(init.body as string) as Row).room)
-      return res(200, [{ code }])
+      return ok({ room, member })
     }
-    const current = store.get(code)
-    return res(200, current ? [{ room: structuredClone(current) }] : [])
+    if (fn === 'duo_add_round') {
+      room.rounds.push(args.p_round)
+      room.scores[args.p_round.guesser] += args.p_round.points
+      return ok(room)
+    }
+    if (fn === 'duo_set_character') {
+      Object.assign(
+        room.members.find((m: any) => m.id === args.p_member_id),
+        { characterId: args.p_character, answers: args.p_answers },
+      )
+      return ok(room)
+    }
+    return fail('desconocida')
   })
-  return { store, stats }
+  return { rooms, calls }
 }
 
 async function loadServices() {
@@ -66,18 +75,23 @@ describe('compareAnswers', () => {
 })
 
 describe('salas compartidas', () => {
-  beforeEach(() => vi.unstubAllGlobals())
-
-  it('crea salas con códigos de 5 caracteres sin letras ambiguas', async () => {
-    installFakeBackend()
-    const { createRoom } = await loadServices()
-    const room = await createRoom('Ana')
-    expect(room.code).toMatch(/^[A-HJ-NP-Z2-9]{5}$/)
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
-  it('no sobrescribe una sala existente si el código se repite', async () => {
-    const { store } = installFakeBackend()
-    store.set('33333', { code: '33333', members: [{ id: 'x', name: 'Otra' }] })
+  it('crea salas con códigos de 5 caracteres sin letras ambiguas y deja activa a la persona', async () => {
+    const { rooms } = installFakeBackend()
+    const { createRoom, getActive } = await loadServices()
+    const room = await createRoom(' Ana ')
+    expect(room.code).toMatch(/^[A-HJ-NP-Z2-9]{5}$/)
+    expect(rooms.get(room.code).members[0].name).toBe('Ana')
+    expect(getActive()).toEqual({ code: room.code, memberId: room.members[0].id })
+  })
+
+  it('prueba otro código si el generado ya existe, sin tocar la sala ajena', async () => {
+    const { rooms } = installFakeBackend()
+    rooms.set('33333', { code: '33333', members: [{ id: 'x', name: 'Otra' }] })
     const real = crypto.getRandomValues.bind(crypto)
     let first = true
     vi.spyOn(crypto, 'getRandomValues').mockImplementation(((a: Uint8Array) => {
@@ -90,37 +104,54 @@ describe('salas compartidas', () => {
     const { createRoom } = await loadServices()
     const room = await createRoom('Zoe')
     expect(room.code).not.toBe('33333')
-    expect(store.get('33333').members[0].name).toBe('Otra')
-    vi.restoreAllMocks()
+    expect(rooms.get('33333').members[0].name).toBe('Otra')
   })
 
-  it('conserva a todos cuando varias personas se unen al mismo tiempo', async () => {
-    const { store, stats } = installFakeBackend()
-    const { createRoom, joinRoom } = await loadServices()
+  it('une a alguien nuevo y reconoce a quien ya estaba por su nombre', async () => {
+    installFakeBackend()
+    const { createRoom, joinRoom, getActive } = await loadServices()
     const room = await createRoom('Ana')
-    await Promise.all(['B', 'C', 'D', 'E', 'F', 'G'].map((n) => joinRoom(room.code, `Persona ${n}`)))
-    expect(store.get(room.code).members).toHaveLength(7)
-    expect(stats.conflicts).toBeGreaterThan(0)
+    const joined = await joinRoom(room.code.toLowerCase(), 'Beto')
+    expect(joined.members.map((m) => m.name)).toEqual(['Ana', 'Beto'])
+    const again = await joinRoom(room.code, 'ana')
+    expect(again.members).toHaveLength(2)
+    expect(getActive()?.memberId).toBe(room.members[0].id)
   })
 
-  it('migra salas antiguas sin campo rev', async () => {
-    const { store } = installFakeBackend()
-    store.set('OLD22', {
-      code: 'OLD22',
-      members: [{ id: 'm1', name: 'Vieja' }],
-      scores: { m1: 0 },
-      rounds: [],
+  it('guarda rondas y personajes en la sala activa', async () => {
+    const { rooms } = installFakeBackend()
+    const { createRoom, joinRoom, saveRound, saveCharacter, getRoom } = await loadServices()
+    const a = await createRoom('Ana')
+    const b = await joinRoom(a.code, 'Beto')
+    const beto = b.members[1]
+    await saveRound({
+      phrase: 'p',
+      writer: a.members[0].id,
+      guesser: beto.id,
+      original: 'x',
+      prediction: 'x',
+      points: 3,
+      similarity: 'exacta',
       createdAt: 1,
     })
-    const { joinRoom } = await loadServices()
-    await joinRoom('OLD22', 'Nuevo')
-    expect(store.get('OLD22').members).toHaveLength(2)
-    expect(store.get('OLD22').rev).toBe(1)
+    await saveCharacter('soñador', ['a'])
+    expect(rooms.get(a.code).scores[beto.id]).toBe(3)
+    expect(getRoom(a.code)?.rounds).toHaveLength(1)
+    expect(getRoom(a.code)?.members.find((m) => m.id === beto.id)?.characterId).toBe('soñador')
   })
 
-  it('avisa cuando la sala no existe', async () => {
+  it('traduce los errores del servidor a mensajes en español', async () => {
     installFakeBackend()
     const { joinRoom } = await loadServices()
     await expect(joinRoom('NOPE1', 'Ana')).rejects.toThrow('No encontramos esa sala')
+  })
+
+  it('avisa si no hay conexión', async () => {
+    installFakeBackend()
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch')
+    })
+    const { joinRoom } = await loadServices()
+    await expect(joinRoom('ABCDE', 'Ana')).rejects.toThrow('No hay conexión')
   })
 })
