@@ -1,6 +1,23 @@
-# DÚO — Conoce a tu equipo
+# DÚO · Convive con tu equipo
 
-DÚO es una aplicación web en español para integrar equipos mediante dos dinámicas sociales: **Completa la frase** y **¿Qué personaje eres?**. Es un MVP con salas compartidas en Supabase, listo para desplegarse como SPA en Vercel.
+DÚO es una aplicación web para que un equipo se reúna en una sala temporal y juegue dinámicas breves para conocerse mejor. El anfitrión controla qué dinámica se juega y cuándo; al iniciar, todos los participantes conectados entran automáticamente a la misma actividad.
+
+## Cómo se usa
+
+1. Una persona crea una sala y comparte el código.
+2. Cada compañero abre la app desde su propio dispositivo y entra con el código y su nombre.
+3. En **Equipo**, el anfitrión puede iniciar una dinámica de inmediato o programarla para una hora.
+4. La sala se actualiza entre dispositivos. Cuando la dinámica empieza, los participantes son enviados a ella automáticamente.
+5. Al terminar, el anfitrión puede lanzar otra ronda o volver a la sala.
+
+La vista **Equipo** muestra quién está en la sala, quién es el anfitrión y el avance de la ronda activa. Las actividades requieren la participación de todo el equipo para revelar los resultados.
+
+## Dinámicas
+
+- **Coincidencias:** todos responden una misma pregunta; después el equipo lee las respuestas y descubre puntos en común.
+- **Radar del equipo:** todos eligen a un compañero para una consigna positiva y luego ven el resultado compartido.
+
+El cuestionario individual de perfiles permanece disponible como una actividad complementaria desde los resultados del equipo.
 
 ## Tecnologías
 
@@ -8,66 +25,66 @@ DÚO es una aplicación web en español para integrar equipos mediante dos diná
 - React Router para navegación
 - Framer Motion para transiciones
 - Lucide React para iconografía
-- Tailwind CSS 4 (plugin de Vite) y estilos de producto en CSS
-- Persistencia en Supabase (API REST) desde `src/services.ts`, con copia en `localStorage`
+- Tailwind CSS 4 y estilos propios en CSS
+- Supabase para salas compartidas y persistencia entre dispositivos
 
-## Instalación y ejecución
+## Requisitos y ejecución local
 
-Requisitos: Node.js 20.19+ o 22.12+ y npm.
+Se requiere Node.js 20.19 o posterior y npm.
 
 ```bash
-cp .env.example .env.local   # completa tu URL y tu clave anon de Supabase (este archivo no se versiona)
 npm install
 npm run dev
 ```
 
-Vite mostrará la dirección local, normalmente `http://localhost:5173`. Para crear y previsualizar el build:
+Para que las salas funcionen, configura las variables de Supabase en `.env.local` (consulta `.env.example`):
+
+```env
+VITE_SUPABASE_URL=https://TU-PROYECTO.supabase.co
+VITE_SUPABASE_ANON_KEY=TU_CLAVE_PUBLICABLE
+```
+
+Vite mostrará la dirección local, normalmente `http://localhost:5173`. Para generar y previsualizar la versión de producción:
 
 ```bash
 npm run build
 npm run preview
 ```
 
-## Funcionalidades
+## Configuración de Supabase
 
-- Crear una sala o unirse desde otro dispositivo con el código compartido; los participantes entran individualmente.
-- Dinámica compartida Coincidencias: todos responden la misma pregunta y el anfitrión revela el mural cuando participa el equipo completo.
-- Dinámica Radar del equipo: todos votan por una persona para una consigna positiva y descubren juntos el resultado.
-- Cuestionario individual de perfiles disponible desde los resultados del equipo.
-- Vista del equipo con integrantes, actividad en vivo y guía para compartir la sala.
-- Diseño responsive, navegación SPA, estados vacíos y confirmaciones/mensajes de estado.
+Ejecuta el archivo completo `supabase-setup.sql` en **Supabase → SQL Editor**. El script configura la tabla y las funciones de base de datos que usa la app. Es idempotente y puede volver a ejecutarse para actualizar la configuración.
 
-## Estructura
+El navegador usa solo la URL del proyecto y la clave publicable/anon. No pongas claves `secret` o `service_role` en el frontend ni en variables `VITE_`.
 
-```text
-src/
-  App.tsx       Pantallas y flujos de la aplicación
-  data.ts       42 frases, 8 preguntas y 6 personajes
-  services.ts   Salas (Supabase), caché local y comparación de respuestas
-  styles.css    Sistema visual responsive y animaciones
-  main.tsx      Punto de entrada
-```
-
-## Persistencia y límites conocidos
-
-Las salas, integrantes, resultados, historial y puntuaciones se guardan en Supabase. La sesión activa se conserva en `localStorage` para recordar quién eres en ese navegador. La app vuelve a consultar la sala cada tres segundos para reflejar cambios entre dispositivos. Todas las lecturas y escrituras pasan por funciones de Postgres (`duo_get_room`, `duo_join_room`, `duo_add_round`…) que bloquean la sala mientras la modifican, así que varios jugadores guardando a la vez no se pisan. El acceso es por código y nombre; esta configuración sirve para un MVP y no implementa autenticación de usuarios. El navegador ya no puede leer ni escribir la tabla directamente: solo llama a esas funciones, que exigen conocer el código de sala (nadie puede listar o sobrescribir salas ajenas). Aun así, quien tenga el código puede entrar a la sala, así que no guardes información sensible.
-
-La coincidencia aproximada compara palabras normalizadas en español y no usa IA. El empate del cuestionario elige aleatoriamente entre los perfiles con más respuestas. Los resultados son lúdicos, no son evaluaciones psicológicas.
-
-La app guarda las salas en Supabase para compartirlas entre dispositivos. Configura `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` localmente y como variables de entorno en Vercel. Ejecuta `supabase-setup.sql` en el SQL Editor de Supabase. Usa únicamente la clave publishable/anon en el navegador; nunca uses una clave `secret` o `service_role`.
+La app consulta la sala periódicamente para reflejar cambios en otros dispositivos. La sesión del participante se conserva en el almacenamiento de sesión del navegador y se elimina al cerrar esa sesión del navegador. La sala se elimina automáticamente si el anfitrión deja de enviar señales durante cinco minutos. El acceso se basa en el código de sala y el nombre, sin cuentas de usuario; comparte el código solo con tu equipo y no incluyas información sensible.
 
 ## Despliegue en Vercel
 
-1. Sube este proyecto a un repositorio Git.
-2. Impórtalo en Vercel. El preset de Vite detecta `npm run build` y `dist` como salida.
-3. Agrega `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` en Settings → Environment Variables.
-4. `vercel.json` reescribe las rutas SPA a `index.html`, permitiendo recargar rutas internas.
+1. Importa el repositorio en Vercel y usa la configuración de Vite: comando de build `npm run build` y directorio de salida `dist`.
+2. En **Settings → Environment Variables**, agrega `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` para Production y Preview según necesites.
+3. Ejecuta `supabase-setup.sql` en el proyecto de Supabase conectado a esas variables.
+4. Despliega o vuelve a desplegar la rama correspondiente después de guardar las variables.
 
-> Ejecuta `supabase-setup.sql` en el SQL Editor **antes** de desplegar esta versión (es idempotente y conserva las salas existentes): el cliente ya no funciona con las políticas abiertas de la versión anterior.
+`vercel.json` configura las rutas SPA para que las páginas internas también funcionen al abrirlas o recargarlas directamente.
 
-## Pruebas
+## Estructura principal
+
+```text
+src/
+  App.tsx       Vistas, navegación y dinámicas de la aplicación
+  data.ts       Preguntas y datos de las actividades
+  services.ts   Salas, sesión local y comunicación con Supabase
+  styles.css    Estilos responsive y animaciones
+  main.tsx      Punto de entrada
+supabase-setup.sql  Tabla, permisos y funciones RPC de Supabase
+```
+
+## Comandos disponibles
 
 ```bash
-npm test                      # cliente: comparación de respuestas y flujo de salas (servidor simulado)
-./scripts/test-sql.sh         # SQL: permisos y concurrencia reales; requiere un Postgres local (ver el encabezado del script)
+npm run dev       # servidor local de desarrollo
+npm run build     # comprobación TypeScript y build de producción
+npm run preview   # vista previa del build
+npm test          # pruebas unitarias
 ```
