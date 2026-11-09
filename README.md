@@ -1,1 +1,64 @@
-# duo
+# DÚO — Conoce a tu equipo
+
+DÚO es una aplicación web en español para integrar equipos mediante dos dinámicas sociales: **Completa la frase** y **¿Qué personaje eres?**. Está preparada como MVP local y para desplegarse como SPA en Vercel.
+
+## Tecnologías
+
+- React, TypeScript y Vite
+- React Router para navegación
+- Framer Motion para transiciones
+- Lucide React para iconografía
+- Tailwind CSS 4 (plugin de Vite) y estilos de producto en CSS
+- Persistencia desacoplada en `src/services.ts`; preparada para cambiarse por Supabase
+
+## Instalación y ejecución
+
+Requisitos: Node.js 20.19+ o 22.12+ y npm.
+
+```bash
+npm install
+npm run dev
+```
+
+Vite mostrará la dirección local, normalmente `http://localhost:5173`. Para crear y previsualizar el build:
+
+```bash
+npm run build
+npm run preview
+```
+
+## Funcionalidades
+
+- Crear sala con código o entrar con un código existente; administrar nombres en el panel del equipo.
+- Juego de frases por turnos, selección de participantes, comparación textual exacta/aproximada, revelación, historial y puntos (3/2/0).
+- Cuestionario individual de ocho preguntas, seis perfiles, tarjeta de resultado y opción para repetir.
+- Resultados del equipo con distribución de perfiles y memoria de rondas.
+- Diseño responsive, navegación SPA, estados vacíos y confirmaciones/mensajes de estado.
+
+## Estructura
+
+```text
+src/
+  App.tsx       Pantallas y flujos de la aplicación
+  data.ts       42 frases, 8 preguntas y 6 personajes
+  services.ts   Salas, persistencia local y comparación de respuestas
+  styles.css    Sistema visual responsive y animaciones
+  main.tsx      Punto de entrada
+```
+
+## Persistencia y límites conocidos
+
+Las salas, integrantes, resultados, historial y puntuaciones se guardan en Supabase. La sesión activa se conserva en `localStorage` para recordar quién eres en ese navegador. La app vuelve a consultar la sala cada tres segundos para reflejar cambios entre dispositivos. El acceso es por código y nombre; esta configuración sirve para un MVP y no implementa autenticación de usuarios.
+
+La coincidencia aproximada compara palabras normalizadas en español y no usa IA. El empate del cuestionario elige aleatoriamente entre los perfiles con más respuestas. Los resultados son lúdicos, no son evaluaciones psicológicas.
+
+La app guarda las salas en Supabase para compartirlas entre dispositivos. Configura `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` localmente y como variables de entorno en Vercel. Ejecuta `supabase-setup.sql` en el SQL Editor de Supabase. Usa únicamente la clave publishable/anon en el navegador; nunca uses una clave `secret` o `service_role`.
+
+## Despliegue en Vercel
+
+1. Sube este proyecto a un repositorio Git.
+2. Impórtalo en Vercel. El preset de Vite detecta `npm run build` y `dist` como salida.
+3. Agrega `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` en Settings → Environment Variables.
+4. `vercel.json` reescribe las rutas SPA a `index.html`, permitiendo recargar rutas internas.
+
+> Ejecuta primero `supabase-setup.sql` en el SQL Editor del proyecto de Supabase.
