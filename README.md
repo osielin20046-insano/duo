@@ -1,6 +1,6 @@
 # DÚO — Conoce a tu equipo
 
-DÚO es una aplicación web en español para integrar equipos mediante dos dinámicas sociales: **Completa la frase** y **¿Qué personaje eres?**. Está preparada como MVP local y para desplegarse como SPA en Vercel.
+DÚO es una aplicación web en español para integrar equipos mediante dos dinámicas sociales: **Completa la frase** y **¿Qué personaje eres?**. Es un MVP con salas compartidas en Supabase, listo para desplegarse como SPA en Vercel.
 
 ## Tecnologías
 
@@ -9,13 +9,14 @@ DÚO es una aplicación web en español para integrar equipos mediante dos diná
 - Framer Motion para transiciones
 - Lucide React para iconografía
 - Tailwind CSS 4 (plugin de Vite) y estilos de producto en CSS
-- Persistencia desacoplada en `src/services.ts`; preparada para cambiarse por Supabase
+- Persistencia en Supabase (API REST) desde `src/services.ts`, con copia en `localStorage`
 
 ## Instalación y ejecución
 
 Requisitos: Node.js 20.19+ o 22.12+ y npm.
 
 ```bash
+cp .env.example .env.local   # completa tu URL y tu clave anon de Supabase (este archivo no se versiona)
 npm install
 npm run dev
 ```
@@ -41,14 +42,14 @@ npm run preview
 src/
   App.tsx       Pantallas y flujos de la aplicación
   data.ts       42 frases, 8 preguntas y 6 personajes
-  services.ts   Salas, persistencia local y comparación de respuestas
+  services.ts   Salas (Supabase), caché local y comparación de respuestas
   styles.css    Sistema visual responsive y animaciones
   main.tsx      Punto de entrada
 ```
 
 ## Persistencia y límites conocidos
 
-Las salas, integrantes, resultados, historial y puntuaciones se guardan en Supabase. La sesión activa se conserva en `localStorage` para recordar quién eres en ese navegador. La app vuelve a consultar la sala cada tres segundos para reflejar cambios entre dispositivos. El acceso es por código y nombre; esta configuración sirve para un MVP y no implementa autenticación de usuarios.
+Las salas, integrantes, resultados, historial y puntuaciones se guardan en Supabase. La sesión activa se conserva en `localStorage` para recordar quién eres en ese navegador. La app vuelve a consultar la sala cada tres segundos para reflejar cambios entre dispositivos. Cada escritura usa control de concurrencia optimista (campo `rev` dentro de la sala) y se reintenta si otra persona guardó al mismo tiempo, así que dos jugadores guardando a la vez no se pisan. El acceso es por código y nombre; esta configuración sirve para un MVP y no implementa autenticación de usuarios. Las políticas de `supabase-setup.sql` permiten que cualquiera con la clave anon lea y modifique cualquier sala; el código de sala hace de "contraseña", así que no guardes información sensible.
 
 La coincidencia aproximada compara palabras normalizadas en español y no usa IA. El empate del cuestionario elige aleatoriamente entre los perfiles con más respuestas. Los resultados son lúdicos, no son evaluaciones psicológicas.
 
