@@ -31,8 +31,9 @@ npm run preview
 ## Funcionalidades
 
 - Crear sala con código o entrar con un código existente; administrar nombres en el panel del equipo.
-- Juego de frases por turnos, selección de participantes, comparación textual exacta/aproximada, revelación, historial y puntos (3/2/0).
-- Cuestionario individual de ocho preguntas, seis perfiles, tarjeta de resultado y opción para repetir.
+- Dinámica compartida Coincidencias: todos responden la misma pregunta y el anfitrión revela el mural cuando participa el equipo completo.
+- Dinámica Radar del equipo: todos votan por una persona para una consigna positiva y descubren juntos el resultado.
+- Cuestionario individual de perfiles disponible desde los resultados del equipo.
 - Resultados del equipo con distribución de perfiles y memoria de rondas.
 - Diseño responsive, navegación SPA, estados vacíos y confirmaciones/mensajes de estado.
 

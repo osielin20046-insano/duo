@@ -148,17 +148,76 @@ end
 $$;
 
 -- La clave privada del anfitrión no forma parte del JSON de sala que leen los participantes.
-create or replace function public.duo_schedule_game(p_code text, p_host_token text, p_game text, p_starts_at bigint)
+create or replace function public.duo_schedule_game(p_code text, p_host_token text, p_game text, p_starts_at bigint, p_prompt text)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare r jsonb;
+declare r jsonb; v_activity jsonb;
 begin
   select room into r from public.duo_rooms where code = upper(p_code) for update;
   if r is null then raise exception 'room_not_found' using errcode = 'PT404'; end if;
   if not exists (select 1 from public.duo_rooms where code = upper(p_code) and host_token = p_host_token) then
     raise exception 'host_only' using errcode = 'PT403';
   end if;
-  if p_game is not null and p_game not in ('phrase', 'character') then raise exception 'invalid_game' using errcode = 'PT400'; end if;
-  r := r || jsonb_build_object('selectedGame', p_game, 'startsAt', p_starts_at);
+  if p_game is not null and p_game not in ('common', 'radar') then raise exception 'invalid_game' using errcode = 'PT400'; end if;
+  if p_game is not null and char_length(btrim(coalesce(p_prompt, ''))) not between 8 and 240 then
+    raise exception 'invalid_prompt' using errcode = 'PT400';
+  end if;
+  if p_game is null then
+    r := r || jsonb_build_object('selectedGame', null, 'startsAt', null, 'activity', null);
+  else
+    v_activity := jsonb_build_object(
+      'game', p_game, 'prompt', btrim(p_prompt), 'status', 'collecting',
+      'responses', '{}'::jsonb, 'votes', '{}'::jsonb,
+      'round', coalesce((r->'activity'->>'round')::int, 0) + 1,
+      'startedAt', (extract(epoch from clock_timestamp()) * 1000)::bigint
+    );
+    r := r || jsonb_build_object('selectedGame', p_game, 'startsAt', p_starts_at, 'activity', v_activity);
+  end if;
+  update public.duo_rooms set room = r where code = upper(p_code);
+  return r;
+end
+$$;
+
+-- Cada integrante responde o vota una vez por ronda; la sala compartida conserva el avance.
+create or replace function public.duo_submit_activity(p_code text, p_member_id text, p_value text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare r jsonb; v_game text; v_field text; v_value text := btrim(coalesce(p_value, ''));
+begin
+  select room into r from public.duo_rooms where code = upper(p_code) for update;
+  if r is null then raise exception 'room_not_found' using errcode = 'PT404'; end if;
+  if not exists (select 1 from jsonb_array_elements(coalesce(r->'members', '[]'::jsonb)) x where x->>'id' = p_member_id) then
+    raise exception 'member_not_found' using errcode = 'PT404';
+  end if;
+  if r->'activity'->>'status' is distinct from 'collecting' then raise exception 'activity_closed' using errcode = 'PT409'; end if;
+  v_game := r->'activity'->>'game';
+  v_field := case when v_game = 'common' then 'responses' when v_game = 'radar' then 'votes' else null end;
+  if v_field is null then raise exception 'activity_missing' using errcode = 'PT409'; end if;
+  if v_game = 'common' and char_length(v_value) not between 1 and 280 then raise exception 'invalid_response' using errcode = 'PT400'; end if;
+  if v_game = 'radar' and not exists (
+    select 1 from jsonb_array_elements(coalesce(r->'members', '[]'::jsonb)) x where x->>'id' = v_value
+  ) then raise exception 'member_not_found' using errcode = 'PT404'; end if;
+  r := jsonb_set(r, array['activity', v_field], coalesce(r->'activity'->v_field, '{}'::jsonb) || jsonb_build_object(p_member_id, v_value), true);
+  update public.duo_rooms set room = r where code = upper(p_code);
+  return r;
+end
+$$;
+
+-- Solo el anfitrión puede cerrar la votación y revelar las respuestas del grupo.
+create or replace function public.duo_reveal_activity(p_code text, p_host_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare r jsonb; v_field text; v_submitted integer;
+begin
+  select room into r from public.duo_rooms where code = upper(p_code) for update;
+  if r is null then raise exception 'room_not_found' using errcode = 'PT404'; end if;
+  if not exists (select 1 from public.duo_rooms where code = upper(p_code) and host_token = p_host_token) then
+    raise exception 'host_only' using errcode = 'PT403';
+  end if;
+  if r->'activity'->>'status' is distinct from 'collecting' then raise exception 'activity_closed' using errcode = 'PT409'; end if;
+  v_field := case when r->'activity'->>'game' = 'common' then 'responses' else 'votes' end;
+  select count(*) into v_submitted from jsonb_object_keys(coalesce(r->'activity'->v_field, '{}'::jsonb));
+  if v_submitted < jsonb_array_length(coalesce(r->'members', '[]'::jsonb)) then
+    raise exception 'activity_incomplete' using errcode = 'PT409';
+  end if;
+  r := jsonb_set(r, '{activity,status}', '"revealed"'::jsonb, true);
   update public.duo_rooms set room = r where code = upper(p_code);
   return r;
 end
@@ -180,7 +239,9 @@ $$;
 
 revoke all on function public.duo_get_room(text), public.duo_create_room(jsonb), public.duo_join_room(text, text, text),
   public.duo_add_round(text, jsonb), public.duo_set_character(text, text, text, jsonb),
-  public.duo_schedule_game(text, text, text, bigint), public.duo_host_heartbeat(text, text) from public;
+  public.duo_schedule_game(text, text, text, bigint, text), public.duo_host_heartbeat(text, text),
+  public.duo_submit_activity(text, text, text), public.duo_reveal_activity(text, text) from public;
 grant execute on function public.duo_get_room(text), public.duo_create_room(jsonb), public.duo_join_room(text, text, text),
   public.duo_add_round(text, jsonb), public.duo_set_character(text, text, text, jsonb),
-  public.duo_schedule_game(text, text, text, bigint), public.duo_host_heartbeat(text, text) to anon, authenticated;
+  public.duo_schedule_game(text, text, text, bigint, text), public.duo_host_heartbeat(text, text),
+  public.duo_submit_activity(text, text, text), public.duo_reveal_activity(text, text) to anon, authenticated;

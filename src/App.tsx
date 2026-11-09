@@ -33,6 +33,8 @@ import {
   saveRound,
   scheduleGame,
   clearScheduledGame,
+  submitActivity,
+  revealActivity,
 } from './services'
 import type { Round } from './services'
 
@@ -41,6 +43,26 @@ const variants = {
   animate: { opacity: 1, y: 0, transition: { duration: 0.35 } },
   exit: { opacity: 0, y: -8, transition: { duration: 0.18 } },
 }
+const commonPrompts = [
+  '¿Qué pequeño detalle puede mejorarle el día a alguien del equipo?',
+  '¿Qué habilidad te gustaría aprender este año?',
+  '¿Cuál sería un plan perfecto para celebrar un logro del equipo?',
+  '¿Qué canción pondrías para levantar el ánimo en un día pesado?',
+  '¿Qué cosa disfrutas hacer fuera del trabajo y casi nadie sabe?',
+  '¿Qué consejo te habría servido mucho cuando empezaste tu carrera?',
+  '¿Qué lugar te gustaría conocer con tus compañeros?',
+  '¿Qué talento inesperado tienes?',
+]
+const radarPrompts = [
+  '¿Quién del equipo encontraría el mejor plan para una aventura improvisada?',
+  '¿A quién le pedirías ayuda para aprender algo nuevo?',
+  '¿Quién tiene el talento de hacer sentir bienvenida a la gente?',
+  '¿Quién propondría la idea más creativa para celebrar un logro?',
+  '¿Quién mantendría la calma si el plan cambia a última hora?',
+  '¿Quién descubriría el mejor café o lugar para comer cerca?',
+  '¿Quién te enseñaría algo que no sabías que necesitabas aprender?',
+  '¿Quién contagia más entusiasmo cuando el equipo logra algo?',
+]
 function Brand({ small = false }: { small?: boolean }) {
   return (
     <Link className={`brand ${small ? 'brand-small' : ''}`} to="/">
@@ -188,7 +210,7 @@ function Home() {
       <section className="home-games">
         <div className="section-heading">
           <div>
-            <div className="eyebrow">DOS FORMAS DE DESCUBRIRSE</div>
+            <div className="eyebrow">DINÁMICAS PARA TODO EL EQUIPO</div>
             <h2>¿A qué jugamos?</h2>
           </div>
           <Link to="/sala" className="text-link">
@@ -198,7 +220,7 @@ function Home() {
         <div className="game-grid">
           <Link to="/sala" className="game-tile tile-lavender">
             <div className="tile-top">
-              <span className="tile-index">01 / COMPLETA LA FRASE</span>
+              <span className="tile-index">01 / TODOS RESPONDEN</span>
               <ArrowUpRight size={18} />
             </div>
             <div className="tile-illustration phrase-illustration">
@@ -208,18 +230,18 @@ function Home() {
               <div className="scribble" />
             </div>
             <h3>
-              Adivina lo que
+              Encuentren lo que
               <br />
-              piensa tu equipo.
+              tienen en común.
             </h3>
-            <p>Una frase, dos respuestas y muchas sorpresas en el camino.</p>
+            <p>Una pregunta, una respuesta de cada persona y una revelación para conversar.</p>
             <span className="tile-link">
               Descubrir dinámica <ArrowRight size={15} />
             </span>
           </Link>
           <Link to="/sala" className="game-tile tile-peach">
             <div className="tile-top">
-              <span className="tile-index">02 / ¿QUÉ PERSONAJE ERES?</span>
+              <span className="tile-index">02 / TODOS VOTAN</span>
               <ArrowUpRight size={18} />
             </div>
             <div className="tile-illustration personality-illustration">
@@ -235,11 +257,11 @@ function Home() {
               </div>
             </div>
             <h3>
-              Encuentra tu lugar
+              Descubran los talentos
               <br />
-              en la historia.
+              del equipo.
             </h3>
-            <p>Ocho preguntas para descubrir el rol que te hace único.</p>
+            <p>Una consigna divertida, un voto de cada quien y un resultado para celebrar.</p>
             <span className="tile-link">
               Descubrir dinámica <ArrowRight size={15} />
             </span>
@@ -385,15 +407,17 @@ function Dashboard() {
     [busy, setBusy] = useState(false)
   const self = room?.members.find((m) => m.id === active?.memberId)
   const isHost = Boolean(active?.hostToken)
-  const gamePath = room?.selectedGame === 'phrase' ? '/jugar-frase' : '/test-personaje'
+  const gamePath = room?.selectedGame === 'common' ? '/coincidencias' : '/radar'
   const startTime = room?.startsAt ?? null
   if (!room) return <Navigate to="/sala" replace />
-  async function chooseGame(game: 'phrase' | 'character') {
+  async function chooseGame(game: 'common' | 'radar') {
     setBusy(true)
     try {
       const when = startsAt ? new Date(startsAt).getTime() : null
       if (when !== null && (!Number.isFinite(when) || when < Date.now())) throw Error('Elige una hora futura.')
-      await scheduleGame(game, when)
+      const prompts = game === 'common' ? commonPrompts : radarPrompts
+      const prompt = prompts[Math.floor(Math.random() * prompts.length)]
+      await scheduleGame(game, when, prompt)
       setToast(when ? 'Dinámica programada para toda la sala.' : 'La dinámica comienza para toda la sala.')
     } catch (err) { setToast(err instanceof Error ? err.message : 'No se pudo actualizar la sala.') }
     finally { setBusy(false); setTimeout(() => setToast(''), 3000) }
@@ -458,11 +482,11 @@ function Dashboard() {
                 <div className="eyebrow">SALA EN VIVO {isHost ? '· ERES ANFITRIÓN' : '· ESPERANDO AL ANFITRIÓN'}</div>
                 <p>{room.selectedGame ? (startTime && startTime > Date.now() ? `La dinámica inicia ${new Date(startTime).toLocaleString()}` : 'La dinámica está iniciando en todos los dispositivos.') : 'El anfitrión elige qué jugar y cuándo empezar.'}</p>
               </div>
-              {room.selectedGame && (!startTime || startTime <= Date.now()) && <button className="button button-primary" onClick={() => nav(gamePath)}>{isHost ? 'Entrar a la dinámica' : 'Entrar al juego de la sala'} <ArrowRight size={15} /></button>}
+              {(room.selectedGame === 'common' || room.selectedGame === 'radar') && (!startTime || startTime <= Date.now()) && <button className="button button-primary" onClick={() => nav(gamePath)}>{isHost ? 'Entrar a la dinámica' : 'Entrar al juego de la sala'} <ArrowRight size={15} /></button>}
               {isHost && <div className="host-controls-actions">
-                <input aria-label="Hora de inicio" type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
-                <button className="button button-primary" disabled={busy} onClick={() => void chooseGame('phrase')}>Iniciar Completa la frase <ArrowRight size={15} /></button>
-                <button className="button button-dark" disabled={busy} onClick={() => void chooseGame('character')}>Iniciar Personaje <ArrowRight size={15} /></button>
+                <label className="schedule-label">Hora de inicio (opcional)<input aria-label="Hora de inicio, opcional" type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} /></label>
+                <button className="button button-primary" disabled={busy} onClick={() => void chooseGame('common')}>{startsAt ? 'Programar Coincidencias' : 'Jugar Coincidencias ahora'} <ArrowRight size={15} /></button>
+                <button className="button button-dark" disabled={busy} onClick={() => void chooseGame('radar')}>{startsAt ? 'Programar Radar' : 'Jugar Radar ahora'} <ArrowRight size={15} /></button>
                 {room.selectedGame && <button className="host-stop" disabled={busy} onClick={() => void stopGame()}>Cancelar dinámica</button>}
               </div>}
             </section>
@@ -473,11 +497,11 @@ function Dashboard() {
                 </div>
                 <div className="dash-game-copy">
                   <div className="game-meta">
-                    DINÁMICA 01 <span>·</span> 5 MIN
+                    TODOS PARTICIPAN <span>·</span> 3 MIN
                   </div>
-                  <h3>Completa la frase</h3>
-                  <p>¿Qué tanto conoces a tus compañeros? Intenta adivinar qué responderían.</p>
-                  <span className="game-meta">El anfitrión controla el inicio</span>
+                  <h3>Coincidencias</h3>
+                  <p>Todos responden la misma pregunta. Después revelamos y descubrimos qué tienen en común.</p>
+                  <span className="game-meta">1. Responde · 2. Revelamos · 3. Platicamos</span>
                 </div>
                 <div className="dash-number">01</div>
               </article>
@@ -487,11 +511,11 @@ function Dashboard() {
                 </div>
                 <div className="dash-game-copy">
                   <div className="game-meta">
-                    DINÁMICA 02 <span>·</span> 3 MIN
+                    VOTACIÓN GRUPAL <span>·</span> 2 MIN
                   </div>
-                  <h3>¿Qué personaje eres?</h3>
-                  <p>Descubre qué papel desempeñas dentro de tu equipo.</p>
-                  <span className="game-meta">El anfitrión controla el inicio</span>
+                  <h3>Radar del equipo</h3>
+                  <p>Voten por quien mejor encaja con una consigna positiva y descubran los talentos que ve el equipo.</p>
+                  <span className="game-meta">1. Elige · 2. Todos votan · 3. Descubrimos</span>
                 </div>
                 <div className="dash-number">02</div>
               </article>
@@ -567,6 +591,123 @@ function Dashboard() {
             {toast}
           </div>
         )}
+      </motion.section>
+    </Page>
+  )
+}
+function SharedActivity({ kind }: { kind: 'common' | 'radar' }) {
+  const nav = useNavigate(),
+    active = getActive(),
+    room = active ? getRoom(active.code) : null,
+    activity = room?.activity,
+    [value, setValue] = useState(''),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState('')
+  const isHost = Boolean(active?.hostToken)
+  const isCommon = kind === 'common'
+  const field = isCommon ? activity?.responses : activity?.votes
+  const submitted = Boolean(active && field?.[active.memberId])
+  const totalSubmitted = Object.keys(field || {}).length
+  const promptPool = isCommon ? commonPrompts : radarPrompts
+  if (!room) return <Navigate to="/sala" replace />
+  if (room.selectedGame !== kind || (room.startsAt != null && room.startsAt > Date.now()) || !activity)
+    return <Navigate to="/juegos" replace />
+  const voteCounts = room.members.map((member) => ({
+    member,
+    votes: Object.values(activity.votes || {}).filter((id) => id === member.id).length,
+  }))
+  const highScore = Math.max(0, ...voteCounts.map((row) => row.votes))
+  const winners = voteCounts.filter((row) => row.votes === highScore && highScore > 0)
+  async function send() {
+    if (!value.trim()) return
+    setBusy(true)
+    setError('')
+    try { await submitActivity(value) }
+    catch (err) { setError(err instanceof Error ? err.message : 'No se pudo guardar tu participación.') }
+    finally { setBusy(false) }
+  }
+  async function reveal() {
+    setBusy(true)
+    setError('')
+    try { await revealActivity() }
+    catch (err) { setError(err instanceof Error ? err.message : 'No se pudo revelar la ronda.') }
+    finally { setBusy(false) }
+  }
+  async function nextRound() {
+    const options = promptPool.filter((prompt) => prompt !== activity.prompt)
+    const prompt = options[Math.floor(Math.random() * options.length)] || promptPool[0]
+    setBusy(true)
+    setError('')
+    try { await scheduleGame(kind, null, prompt) }
+    catch (err) { setError(err instanceof Error ? err.message : 'No se pudo iniciar otra ronda.') }
+    finally { setBusy(false) }
+  }
+  async function finish() {
+    setBusy(true)
+    try { await clearScheduledGame(); nav('/juegos') }
+    catch (err) { setError(err instanceof Error ? err.message : 'No se pudo cerrar la dinámica.') }
+    finally { setBusy(false) }
+  }
+  return (
+    <Page>
+      <motion.section className="activity-page" initial="initial" animate="animate" variants={variants}>
+        <div className="game-page-head">
+          <Link to="/juegos" className="back-link"><ArrowLeft size={15} /> Sala del equipo</Link>
+          <span className="game-label"><Sparkles size={15} /> {isCommon ? 'COINCIDENCIAS' : 'RADAR DEL EQUIPO'}</span>
+          <span className="round-count">RONDA {String(activity.round).padStart(2, '0')}</span>
+        </div>
+        <div className="activity-progress"><span style={{ width: `${Math.min(100, totalSubmitted / room.members.length * 100)}%` }} /></div>
+        <div className="activity-shell">
+          <div className="activity-step"><span>LA PREGUNTA DEL EQUIPO</span><b>{totalSubmitted}/{room.members.length} PARTICIPANDO</b></div>
+          <h1>{activity.prompt}</h1>
+          <p className="activity-intro">{isCommon
+            ? 'Cada quien escribe su respuesta. Cuando estén listos, el anfitrión las revela todas juntas.'
+            : 'Piensa en alguien del equipo que encaje con la consigna. Todos votan y el resultado se revela al mismo tiempo.'}</p>
+          {activity.status === 'collecting' ? (
+            <div className="activity-participate">
+              {isCommon ? (
+                <>
+                  <label htmlFor="activity-answer">Tu respuesta</label>
+                  <textarea id="activity-answer" maxLength={280} value={value || (active ? activity.responses[active.memberId] || '' : '')} onChange={(event) => setValue(event.target.value)} placeholder="Escribe algo breve y auténtico…" />
+                </>
+              ) : (
+                <>
+                  <p className="activity-pick-label">¿Quién te viene a la mente?</p>
+                  <div className="activity-vote-grid">
+                    {room.members.map((member, index) => (
+                      <button key={member.id} type="button" className={`activity-person ${value === member.id || (!value && active && activity.votes[active.memberId] === member.id) ? 'selected' : ''}`} onClick={() => setValue(member.id)}>
+                        <span className="activity-person-avatar" style={{ '--member-color': ['#b4a0ff', '#f2a28f', '#92c8b4', '#ecc978'][index % 4] } as React.CSSProperties}>{member.name.slice(0, 1).toUpperCase()}</span>
+                        {member.name}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+              {submitted && <div className="activity-confirm"><Check size={16} /> Ya participaste. Puedes cambiar tu respuesta mientras esperan.</div>}
+              <button className="button button-primary activity-submit" disabled={busy || !value.trim()} onClick={() => void send()}>{busy ? 'Guardando…' : submitted ? 'Actualizar mi respuesta' : 'Listo, enviar mi respuesta'} <ArrowRight size={16} /></button>
+              <div className="activity-roster"><strong>En la sala</strong>{room.members.map((member) => <span key={member.id} className={field?.[member.id] ? 'done' : ''}>{field?.[member.id] ? <Check size={13} /> : <span className="roster-dot" />}{member.name}{member.id === active?.memberId ? ' (tú)' : ''}</span>)}</div>
+              {isHost && totalSubmitted < room.members.length && <p className="activity-host-note">Faltan {room.members.length - totalSubmitted} por participar. Al completar el equipo podrás revelar.</p>}
+              {isHost && <button className="button button-dark activity-reveal" disabled={busy || totalSubmitted < room.members.length} onClick={() => void reveal()}>Revelar respuestas de todos <Sparkles size={15} /></button>}
+              {!isHost && <p className="activity-host-note">El anfitrión revelará la ronda cuando el equipo esté listo.</p>}
+            </div>
+          ) : (
+            <div className="activity-results">
+              {isCommon ? (
+                <>
+                  <div className="activity-result-heading"><Sparkles size={18} /><div><strong>Esto compartimos</strong><span>Lean las respuestas y encuentren sus coincidencias.</span></div></div>
+                  <div className="activity-answer-grid">{room.members.filter((member) => activity.responses[member.id]).map((member, index) => <article className="activity-answer" key={member.id}><span>{member.name}</span><p>{activity.responses[member.id]}</p><small>{index === 0 ? '¡Alguien tenía que empezar!' : 'Una mirada del equipo'}</small></article>)}</div>
+                </>
+              ) : (
+                <>
+                  <div className="activity-result-heading"><Sparkles size={18} /><div><strong>{winners.length === 1 ? `El equipo eligió a ${winners[0].member.name}` : '¡El equipo ve talento por todas partes!'}</strong><span>{totalSubmitted} votos · cada elección suma una voz</span></div></div>
+                  <div className="activity-vote-results">{voteCounts.map(({ member, votes }) => <div className="activity-vote-result" key={member.id}><span>{member.name}</span><div className="activity-vote-track"><i style={{ width: `${totalSubmitted ? votes / totalSubmitted * 100 : 0}%` }} /></div><b>{votes}</b></div>)}</div>
+                </>
+              )}
+              {isHost ? <div className="activity-host-actions"><button className="button button-primary" disabled={busy} onClick={() => void nextRound()}>Otra pregunta <ArrowRight size={15} /></button><button className="button button-dark" disabled={busy} onClick={() => void finish()}>Volver a elegir dinámica</button></div> : <p className="activity-host-note">El anfitrión puede lanzar otra ronda o volver a la sala.</p>}
+            </div>
+          )}
+          {error && <p className="form-error activity-error">{error}</p>}
+        </div>
       </motion.section>
     </Page>
   )
@@ -858,8 +999,6 @@ function Quiz() {
     [result, setResult] = useState<Character | null>(null),
     [flipped, setFlipped] = useState(false)
   if (!room) return <Navigate to="/sala" replace />
-  if (room.selectedGame !== 'character' || (room.startsAt != null && room.startsAt > Date.now()))
-    return <Navigate to="/juegos" replace />
   async function choose(id: string) {
     const next = [...answers.slice(0, step), id]
     setAnswers(next)
@@ -1189,6 +1328,8 @@ export default function App() {
       <Route path="/" element={<Home />} />
       <Route path="/sala" element={<RoomPage />} />
       <Route path="/juegos" element={<Games />} />
+      <Route path="/coincidencias" element={<SharedActivity kind="common" />} />
+      <Route path="/radar" element={<SharedActivity kind="radar" />} />
       <Route path="/jugar-frase" element={<SentenceGame />} />
       <Route path="/test-personaje" element={<Quiz />} />
       <Route path="/equipo" element={<TeamResults />} />

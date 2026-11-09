@@ -11,6 +11,15 @@ export type Round = {
   similarity: 'exacta' | 'aproximada' | 'distinta'
   createdAt: number
 }
+export type Activity = {
+  game: 'common' | 'radar'
+  prompt: string
+  status: 'collecting' | 'revealed'
+  responses: Record<string, string>
+  votes: Record<string, string>
+  round: number
+  startedAt: number
+}
 export type Room = {
   code: string
   members: Member[]
@@ -18,8 +27,9 @@ export type Room = {
   rounds: Round[]
   createdAt: number
   hostId?: string
-  selectedGame?: 'phrase' | 'character' | null
+  selectedGame?: 'common' | 'radar' | 'phrase' | 'character' | null
   startsAt?: number | null
+  activity?: Activity | null
 }
 type ActiveSession = { code: string; memberId: string; hostToken?: string }
 const KEY = 'duo.rooms.v1',
@@ -70,6 +80,11 @@ const ERRORS: Record<string, string> = {
   room_full: 'La sala ya está llena (máximo 50 personas).',
   too_many_rounds: 'Esta sala alcanzó el máximo de rondas guardadas.',
   host_only: 'Solo el anfitrión puede controlar la dinámica de la sala.',
+  activity_closed: 'La ronda ya se cerró. Vuelve a la sala para ver el resultado.',
+  activity_missing: 'El anfitrión todavía no ha iniciado una ronda.',
+  invalid_response: 'Escribe una respuesta de hasta 280 caracteres.',
+  activity_incomplete: 'Aún faltan compañeros por participar. La ronda se revela cuando todos hayan respondido.',
+  invalid_prompt: 'La pregunta debe tener entre 8 y 240 caracteres.',
 }
 
 // Todas las lecturas y escrituras pasan por funciones de Postgres (ver supabase-setup.sql): cada cambio se aplica
@@ -124,6 +139,7 @@ export const createRoom = async (name: string) => {
       hostId: member.id,
       selectedGame: null,
       startsAt: null,
+      activity: null,
     }
     // false = el código ya existe; se prueba con otro en lugar de sobrescribir la sala de alguien más.
     if (await rpc<boolean>('duo_create_room', { p_room: { ...room, hostToken } })) {
@@ -158,16 +174,28 @@ export const addMember = async (code: string, name: string) => {
   return room
 }
 
-export const scheduleGame = async (game: 'phrase' | 'character', startsAt: number | null) => {
+export const scheduleGame = async (game: 'common' | 'radar', startsAt: number | null, prompt: string) => {
   const a = getActive()
   if (!a?.hostToken) throw Error('Solo el anfitrión de esta pestaña puede controlar la sala.')
-  cache(await rpc<Room>('duo_schedule_game', { p_code: a.code, p_host_token: a.hostToken, p_game: game, p_starts_at: startsAt }))
+  cache(await rpc<Room>('duo_schedule_game', { p_code: a.code, p_host_token: a.hostToken, p_game: game, p_starts_at: startsAt, p_prompt: prompt }))
 }
 
 export const clearScheduledGame = async () => {
   const a = getActive()
   if (!a?.hostToken) throw Error('Solo el anfitrión de esta pestaña puede controlar la sala.')
-  cache(await rpc<Room>('duo_schedule_game', { p_code: a.code, p_host_token: a.hostToken, p_game: null, p_starts_at: null }))
+  cache(await rpc<Room>('duo_schedule_game', { p_code: a.code, p_host_token: a.hostToken, p_game: null, p_starts_at: null, p_prompt: null }))
+}
+
+export const submitActivity = async (value: string) => {
+  const a = getActive()
+  if (!a) throw Error('Vuelve a entrar a la sala para participar.')
+  cache(await rpc<Room>('duo_submit_activity', { p_code: a.code, p_member_id: a.memberId, p_value: value.trim() }))
+}
+
+export const revealActivity = async () => {
+  const a = getActive()
+  if (!a?.hostToken) throw Error('Solo el anfitrión puede revelar la ronda.')
+  cache(await rpc<Room>('duo_reveal_activity', { p_code: a.code, p_host_token: a.hostToken }))
 }
 
 export const saveRound = async (round: Round) => {
